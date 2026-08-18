@@ -10,8 +10,7 @@
     "description",
     "priority",
     "contributes_to",
-    "depends_on",
-    "checks"
+    "depends_on"
   ],
   "properties": {
     "schema": {"const": "task/v1"},
@@ -32,15 +31,6 @@
       "type": "array",
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^T-[0-9]+$"}
-    },
-    "checks": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z][a-z0-9-]*$"
-      }
     }
   }
 }

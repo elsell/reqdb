@@ -7,5 +7,3 @@ priority: 50
 contributes_to:
   - SWR-SESSION-001@1
 depends_on: []
-checks:
-  - test

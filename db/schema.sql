@@ -1,12 +1,6 @@
 PRAGMA foreign_keys = ON;
 PRAGMA user_version = 1;
 
-CREATE TABLE project (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    project_id TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL
-);
-
 CREATE TABLE task_state (
     task_id TEXT PRIMARY KEY,
     definition_hash TEXT NOT NULL,
@@ -73,7 +67,6 @@ CREATE TABLE event (
             'lease_claimed',
             'lease_released',
             'lease_reclaimed',
-            'check_failed',
             'task_completed'
         )
     ),

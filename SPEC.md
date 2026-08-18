@@ -14,7 +14,6 @@ engine.
 - SQLite contains mutable coordination state.
 - Generated documents and indexes are not authoritative.
 - Repository policy grants approval. `reqdb` does not grant approval.
-- `baseline_ref` identifies the approved Git baseline.
 - All agents shall use one state database.
 - The state database shall not be in Git.
 - Direct SQLite access shall occur on one host.
@@ -24,7 +23,6 @@ A multi-host deployment requires a service around the state database.
 A project shall use this layout:
 
 ```text
-reqdb.yaml
 requirements/BRS/
 requirements/StRS/
 requirements/SyRS/
@@ -60,8 +58,8 @@ Each non-business requirement shall refine one or more requirements at the
 immediate parent level. A refinement link shall include the parent revision.
 The refinement graph shall be acyclic.
 
-`reqdb.yaml` shall contain shared document context. The renderer shall group
-requirements by level. It shall generate BRS, StRS, SyRS, and SRS views.
+The version 1 profile shall be fixed. The renderer shall group requirements by
+level. It shall generate BRS, StRS, SyRS, and SRS views.
 
 ## YAML
 
@@ -120,7 +118,7 @@ Only `depends_on` controls task order. Requirement refinement shall not imply
 task order.
 
 Task completion shall not imply requirement fulfillment. Version 1 shall
-report task state, trace coverage, evidence, and check results separately.
+report task state, trace coverage, and evidence separately.
 
 Each task dependency shall exist. A task shall not depend on itself. The work
 graph shall be acyclic.
@@ -157,19 +155,14 @@ Heartbeat, release, and completion shall require the current lease ID and
 fence. An expired lease has no authority. A new claim may replace it. No
 background reaper is required.
 
-`reqdb.yaml` shall define each project check once. Tasks shall reference check
-names. Each name shall exist in `reqdb.yaml`. A check can run an existing unit,
-integration, or end-to-end suite.
-
-Completion shall require an unexpired lease, a Git commit, and successful named
-checks. A failed check shall keep the lease. Completion shall record the task
-hash, commit, and check results.
+Completion shall require an unexpired lease and a Git commit. It shall record
+the task hash and commit. External quality gates shall test the change.
 
 All times shall use UTC and RFC 3339.
 The event log shall be append-only.
 
 Event kinds are `task_reopened`, `lease_claimed`, `lease_released`,
-`lease_reclaimed`, `check_failed`, and `task_completed`.
+`lease_reclaimed`, and `task_completed`.
 
 ## Evidence
 
@@ -200,18 +193,15 @@ for each requirement.
 | `reqdb impact ID` | Show downstream impact and stale links. |
 | `reqdb scan --commit SHA` | Record source evidence. |
 | `reqdb ready` | List ready tasks. |
-| `reqdb claim [TASK] --agent ID` | Claim one ready task. |
-| `reqdb heartbeat LEASE --fence N` | Extend one lease. |
+| `reqdb claim [TASK] --agent ID [--ttl DURATION]` | Claim one ready task. |
+| `reqdb heartbeat LEASE --fence N [--ttl DURATION]` | Extend one lease. |
 | `reqdb release LEASE --fence N` | Release one lease. |
-| `reqdb complete LEASE --fence N --commit SHA --worktree DIR` | Check and complete one task. |
+| `reqdb complete LEASE --fence N --commit SHA` | Complete one task. |
 
 `--root DIR` shall select the project root. It defaults to the current Git
-root. `--state FILE` shall select the state database. `REQDB_ROOT` and
-`REQDB_STATE` can supply these defaults. State commands shall create an absent
-database.
-
-The first state command shall bind the database to `project_id`. Later commands
-shall reject a different project ID.
+root. The state database shall be `reqdb.sqlite3` in the Git common directory.
+State commands shall create an absent database. The default lease duration
+shall be 30 minutes.
 
 Each command shall support `--json`. JSON output shall use one envelope:
 
