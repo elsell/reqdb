@@ -7,16 +7,12 @@
     "schema",
     "id",
     "level",
-    "type",
     "revision",
     "status",
-    "owner",
     "title",
     "statement",
-    "sources",
     "links",
-    "rationale",
-    "verification"
+    "rationale"
   ],
   "properties": {
     "schema": {"const": "requirement/v1"},
@@ -27,27 +23,10 @@
     "level": {
       "enum": ["business", "stakeholder", "system", "software"]
     },
-    "type": {
-      "enum": [
-        "functional",
-        "performance",
-        "interface",
-        "quality",
-        "constraint",
-        "safety",
-        "security"
-      ]
-    },
     "revision": {"type": "integer", "minimum": 1},
     "status": {"enum": ["draft", "approved", "retired"]},
-    "owner": {"type": "string", "minLength": 1},
     "title": {"type": "string", "minLength": 1},
     "statement": {"type": "string", "minLength": 1},
-    "sources": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
-    },
     "links": {
       "type": "object",
       "additionalProperties": false,
@@ -63,18 +42,7 @@
         }
       }
     },
-    "rationale": {"type": "string", "minLength": 1},
-    "verification": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["method", "criterion"],
-      "properties": {
-        "method": {
-          "enum": ["analysis", "demonstration", "inspection", "test"]
-        },
-        "criterion": {"type": "string", "minLength": 1}
-      }
-    }
+    "rationale": {"type": "string", "minLength": 1}
   },
   "allOf": [
     {

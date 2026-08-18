@@ -69,13 +69,9 @@ shall validate and store input.
 An approved requirement shall meet these rules:
 
 - Its statement contains one lowercase `shall`.
-- Its statement defines one obligation.
-- Its verification criterion gives a pass or fail result.
+- Its statement defines one objectively verifiable obligation.
 - Each parent exists at the pinned revision.
 - Each parent is approved.
-
-`verification` shall describe a method and criterion. It shall not name a
-script or store a result.
 
 Mechanical checks cannot prove meaning. Review shall confirm that each
 requirement is necessary, clear, feasible, and correct.
@@ -175,11 +171,10 @@ req:test:SWR-SESSION-001@1
 content hash. The content hash shall use SHA-256 on the file bytes. Evidence
 for an older revision is stale.
 
-An approved software requirement shall have `impl` evidence. A software
-requirement with test verification shall also have `test` evidence.
+An approved software requirement shall have `impl` evidence.
 
-Evidence markers shall link existing tests. They shall not require one script
-for each requirement.
+Evidence markers shall link existing source files or tests. They shall not
+require one script for each requirement.
 
 ## Audit
 

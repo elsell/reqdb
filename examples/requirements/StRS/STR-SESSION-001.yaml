@@ -2,17 +2,13 @@
 schema: requirement/v1
 id: STR-SESSION-001
 level: stakeholder
-type: security
 revision: 1
 status: approved
-owner: security
 title: Define session lifetime
-statement: The security owner shall define a maximum session lifetime.
-sources: []
+statement: >-
+  The security owner shall define a maximum session lifetime in the approved
+  access policy.
 links:
   refines:
     - BR-SESSION-001@1
 rationale: The owner needs direct control of the access period.
-verification:
-  method: inspection
-  criterion: The approved access policy contains a maximum session lifetime.

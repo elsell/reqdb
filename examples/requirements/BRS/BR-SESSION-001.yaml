@@ -2,17 +2,12 @@
 schema: requirement/v1
 id: BR-SESSION-001
 level: business
-type: security
 revision: 1
 status: approved
-owner: security
 title: Limit access duration
-statement: The organization shall limit the duration of authenticated access.
-sources:
-  - Security policy
+statement: >-
+  The organization shall limit each authenticated session to a finite
+  duration.
 links:
   refines: []
 rationale: A finite session limits access after credential theft.
-verification:
-  method: analysis
-  criterion: The approved security policy defines a finite session lifetime.
