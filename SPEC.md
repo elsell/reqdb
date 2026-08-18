@@ -24,7 +24,7 @@ A multi-host deployment requires a service around the state database.
 A project shall use this layout:
 
 ```text
-profile.yaml
+reqdb.yaml
 requirements/BRS/
 requirements/StRS/
 requirements/SyRS/
@@ -32,15 +32,13 @@ requirements/SRS/
 tasks/
 ```
 
-Each requirement directory shall contain one `spec.yaml` file. Other YAML
-files in that directory shall contain requirements. Each file in `tasks` shall
-contain one task.
+Each file under `requirements` shall contain one requirement. Each file under
+`tasks` shall contain one task.
 
 ## Objects
 
 | Object | Storage | Purpose |
 |---|---|---|
-| Specification | YAML | Defines document context. |
 | Requirement | YAML | Defines one obligation. |
 | Task | YAML | Defines one work unit. |
 | Evidence | Source and SQLite | Links code or tests to a requirement. |
@@ -51,7 +49,7 @@ Schema.
 
 ## Hierarchy
 
-| Level | Specification | ID prefix | Parent level |
+| Level | Output | ID prefix | Parent level |
 |---|---|---|---|
 | Business | BRS | `BR-` | None |
 | Stakeholder | StRS | `STR-` | Business |
@@ -61,6 +59,9 @@ Schema.
 Each non-business requirement shall refine one or more requirements at the
 immediate parent level. A refinement link shall include the parent revision.
 The refinement graph shall be acyclic.
+
+`reqdb.yaml` shall contain shared document context. The renderer shall group
+requirements by level. It shall generate BRS, StRS, SyRS, and SRS views.
 
 ## YAML
 
@@ -80,6 +81,9 @@ An approved requirement shall meet these rules:
 - Each parent exists at the pinned revision.
 - Each parent is approved.
 
+`verification` describes a method and a criterion. It does not name a script
+or store a result.
+
 Mechanical checks cannot prove meaning. Review shall confirm that each
 requirement is necessary, clear, feasible, and correct.
 
@@ -87,7 +91,6 @@ requirement is necessary, clear, feasible, and correct.
 
 These fields are normative:
 
-- `specification`
 - `level`
 - `type`
 - `statement`
@@ -109,12 +112,15 @@ A link to an older revision is stale.
 |---|---|---|---|
 | `refines` | Requirement | Requirement | Trace DAG |
 | `depends_on` | Task | Task | Work DAG |
-| `satisfies` | Task | Requirement revision | Task scope |
+| `contributes_to` | Task | Requirement revision | Task scope |
 | `impl` | Source | Requirement revision | Implementation evidence |
 | `test` | Source | Requirement revision | Verification evidence |
 
 Only `depends_on` controls task order. Requirement refinement shall not imply
 task order.
+
+Task completion shall not imply requirement fulfillment. Version 1 shall
+report task state, trace coverage, evidence, and check results separately.
 
 Each task dependency shall exist. A task shall not depend on itself. The work
 graph shall be acyclic.
@@ -131,7 +137,7 @@ A task is ready when all these conditions are true:
 - Its state is open.
 - It has no current lease.
 - Each dependency is complete for its current definition hash.
-- Each satisfied requirement is approved and current.
+- Each referenced requirement is approved and current.
 
 Ready tasks sort by descending priority, then by ID.
 
@@ -151,9 +157,13 @@ Heartbeat, release, and completion shall require the current lease ID and
 fence. An expired lease has no authority. A new claim may replace it. No
 background reaper is required.
 
-Completion shall require an unexpired lease, a Git commit, and successful task
+`reqdb.yaml` shall define each project check once. Tasks shall reference check
+names. Each name shall exist in `reqdb.yaml`. A check can run an existing unit,
+integration, or end-to-end suite.
+
+Completion shall require an unexpired lease, a Git commit, and successful named
 checks. A failed check shall keep the lease. Completion shall record the task
-hash, commit, results, and evidence.
+hash, commit, and check results.
 
 All times shall use UTC and RFC 3339.
 The event log shall be append-only.
@@ -176,6 +186,9 @@ for an older revision is stale.
 
 An approved software requirement shall have `impl` evidence. A software
 requirement with test verification shall also have `test` evidence.
+
+Evidence markers shall link existing tests. They shall not require one script
+for each requirement.
 
 ## CLI
 

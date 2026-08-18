@@ -1,7 +1,6 @@
 ---
 schema: requirement/v1
 id: STR-SESSION-001
-specification: StRS
 level: stakeholder
 type: security
 revision: 1

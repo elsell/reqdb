@@ -9,7 +9,7 @@
     "title",
     "description",
     "priority",
-    "satisfies",
+    "contributes_to",
     "depends_on",
     "checks"
   ],
@@ -19,7 +19,7 @@
     "title": {"type": "string", "minLength": 1},
     "description": {"type": "string", "minLength": 1},
     "priority": {"type": "integer", "minimum": 0, "maximum": 100},
-    "satisfies": {
+    "contributes_to": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
@@ -37,7 +37,10 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
     }
   }
 }

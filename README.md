@@ -2,7 +2,7 @@
 
 `reqdb` coordinates requirements and agent work.
 
-- Git tracks YAML specifications, requirements, and tasks.
+- Git tracks YAML requirements, tasks, and project configuration.
 - SQLite tracks leases, results, evidence, and events.
 - One CLI checks, traces, renders, and claims work.
 
@@ -11,4 +11,4 @@ The profile uses BRS, StRS, SyRS, and SRS. It aligns with
 claim conformance.
 
 This repository contains the version 1 design. See [SPEC.md](SPEC.md),
-[profile.yaml](profile.yaml), and [examples](examples).
+[reqdb.yaml](reqdb.yaml), and [examples](examples).

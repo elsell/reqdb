@@ -6,7 +6,6 @@
   "required": [
     "schema",
     "id",
-    "specification",
     "level",
     "type",
     "revision",
@@ -25,7 +24,6 @@
       "type": "string",
       "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*$"
     },
-    "specification": {"enum": ["BRS", "StRS", "SyRS", "SRS"]},
     "level": {
       "enum": ["business", "stakeholder", "system", "software"]
     },
@@ -84,7 +82,6 @@
       "then": {
         "properties": {
           "id": {"pattern": "^BR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
-          "specification": {"const": "BRS"},
           "links": {
             "properties": {"refines": {"maxItems": 0}}
           }
@@ -96,7 +93,6 @@
       "then": {
         "properties": {
           "id": {"pattern": "^STR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
-          "specification": {"const": "StRS"},
           "links": {
             "properties": {
               "refines": {
@@ -115,7 +111,6 @@
       "then": {
         "properties": {
           "id": {"pattern": "^SYR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
-          "specification": {"const": "SyRS"},
           "links": {
             "properties": {
               "refines": {
@@ -134,7 +129,6 @@
       "then": {
         "properties": {
           "id": {"pattern": "^SWR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
-          "specification": {"const": "SRS"},
           "links": {
             "properties": {
               "refines": {

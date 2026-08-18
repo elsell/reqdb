@@ -1,7 +1,6 @@
 ---
 schema: requirement/v1
 id: BR-SESSION-001
-specification: BRS
 level: business
 type: security
 revision: 1

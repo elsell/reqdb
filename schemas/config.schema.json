@@ -1,29 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:reqdb:schema:specification:v1",
+  "$id": "urn:reqdb:schema:config:v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema",
-    "id",
-    "level",
+    "project_id",
+    "profile",
+    "baseline_ref",
     "title",
     "purpose",
     "scope",
-    "context",
     "references",
-    "terms"
+    "terms",
+    "checks",
+    "lease_ttl_seconds"
   ],
   "properties": {
-    "schema": {"const": "specification/v1"},
-    "id": {"enum": ["BRS", "StRS", "SyRS", "SRS"]},
-    "level": {
-      "enum": ["business", "stakeholder", "system", "software"]
+    "schema": {"const": "reqdb/v1"},
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
+    "profile": {"const": "ieee-29148-2018-simple-v1"},
+    "baseline_ref": {"type": "string", "minLength": 1},
     "title": {"type": "string", "minLength": 1},
     "purpose": {"type": "string", "minLength": 1},
     "scope": {"type": "string", "minLength": 1},
-    "context": {"type": "string", "minLength": 1},
     "references": {
       "type": "array",
       "items": {
@@ -41,24 +44,23 @@
       "type": "object",
       "propertyNames": {"minLength": 1},
       "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "checks": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]*$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command"],
+        "properties": {
+          "command": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "lease_ttl_seconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 86400
     }
-  },
-  "allOf": [
-    {
-      "if": {"properties": {"id": {"const": "BRS"}}},
-      "then": {"properties": {"level": {"const": "business"}}}
-    },
-    {
-      "if": {"properties": {"id": {"const": "StRS"}}},
-      "then": {"properties": {"level": {"const": "stakeholder"}}}
-    },
-    {
-      "if": {"properties": {"id": {"const": "SyRS"}}},
-      "then": {"properties": {"level": {"const": "system"}}}
-    },
-    {
-      "if": {"properties": {"id": {"const": "SRS"}}},
-      "then": {"properties": {"level": {"const": "software"}}}
-    }
-  ]
+  }
 }

@@ -1,7 +1,6 @@
 ---
 schema: requirement/v1
 id: SWR-SESSION-001
-specification: SRS
 level: software
 type: security
 revision: 1

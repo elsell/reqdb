@@ -1,7 +1,6 @@
 ---
 schema: requirement/v1
 id: SYR-SESSION-001
-specification: SyRS
 level: system
 type: security
 revision: 1
