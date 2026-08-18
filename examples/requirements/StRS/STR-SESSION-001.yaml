@@ -11,4 +11,3 @@ statement: >-
 links:
   refines:
     - BR-SESSION-001@1
-rationale: The owner needs direct control of the access period.

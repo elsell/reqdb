@@ -11,8 +11,7 @@
     "status",
     "title",
     "statement",
-    "links",
-    "rationale"
+    "links"
   ],
   "properties": {
     "schema": {"const": "requirement/v1"},
@@ -41,8 +40,7 @@
           }
         }
       }
-    },
-    "rationale": {"type": "string", "minLength": 1}
+    }
   },
   "allOf": [
     {

@@ -10,4 +10,3 @@ statement: >-
   duration.
 links:
   refines: []
-rationale: A finite session limits access after credential theft.

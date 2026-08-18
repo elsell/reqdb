@@ -9,4 +9,3 @@ statement: The system shall reject each session after its maximum lifetime.
 links:
   refines:
     - STR-SESSION-001@1
-rationale: Rejection enforces the approved session lifetime.

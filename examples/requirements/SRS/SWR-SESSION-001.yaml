@@ -11,4 +11,3 @@ statement: >-
 links:
   refines:
     - SYR-SESSION-001@1
-rationale: HTTP 401 gives clients a defined authentication failure.
