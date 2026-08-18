@@ -1,0 +1,19 @@
+---
+schema: requirement/v1
+id: SYR-SESSION-001
+specification: SyRS
+level: system
+type: security
+revision: 1
+status: approved
+owner: platform
+title: Reject expired sessions
+statement: The system shall reject each session after its maximum lifetime.
+sources: []
+links:
+  refines:
+    - STR-SESSION-001@1
+rationale: Rejection enforces the approved session lifetime.
+verification:
+  method: test
+  criterion: The system denies a request that uses an expired session.

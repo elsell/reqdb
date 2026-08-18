@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:reqdb:schema:specification:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "level",
+    "title",
+    "purpose",
+    "scope",
+    "context",
+    "references",
+    "terms"
+  ],
+  "properties": {
+    "schema": {"const": "specification/v1"},
+    "id": {"enum": ["BRS", "StRS", "SyRS", "SRS"]},
+    "level": {
+      "enum": ["business", "stakeholder", "system", "software"]
+    },
+    "title": {"type": "string", "minLength": 1},
+    "purpose": {"type": "string", "minLength": 1},
+    "scope": {"type": "string", "minLength": 1},
+    "context": {"type": "string", "minLength": 1},
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "url": {"type": "string", "format": "uri"}
+        }
+      }
+    },
+    "terms": {
+      "type": "object",
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"id": {"const": "BRS"}}},
+      "then": {"properties": {"level": {"const": "business"}}}
+    },
+    {
+      "if": {"properties": {"id": {"const": "StRS"}}},
+      "then": {"properties": {"level": {"const": "stakeholder"}}}
+    },
+    {
+      "if": {"properties": {"id": {"const": "SyRS"}}},
+      "then": {"properties": {"level": {"const": "system"}}}
+    },
+    {
+      "if": {"properties": {"id": {"const": "SRS"}}},
+      "then": {"properties": {"level": {"const": "software"}}}
+    }
+  ]
+}

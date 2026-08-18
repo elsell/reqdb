@@ -1,0 +1,11 @@
+---
+schema: specification/v1
+id: SyRS
+level: system
+title: Session system requirements
+purpose: Define system behavior for session limits.
+scope: Session creation and request authorization.
+context: The system receives authenticated requests from clients.
+references: []
+terms:
+  expired session: A session that exceeds its maximum lifetime.

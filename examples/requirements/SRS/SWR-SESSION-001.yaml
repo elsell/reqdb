@@ -1,0 +1,21 @@
+---
+schema: requirement/v1
+id: SWR-SESSION-001
+specification: SRS
+level: software
+type: security
+revision: 1
+status: approved
+owner: authentication
+title: Return HTTP 401 for an expired session
+statement: >-
+  The authentication service shall return HTTP 401 for each request that uses
+  an expired session.
+sources: []
+links:
+  refines:
+    - SYR-SESSION-001@1
+rationale: HTTP 401 gives clients a defined authentication failure.
+verification:
+  method: test
+  criterion: Each protected endpoint returns HTTP 401 for an expired session.

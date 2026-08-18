@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:reqdb:schema:requirement:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "specification",
+    "level",
+    "type",
+    "revision",
+    "status",
+    "owner",
+    "title",
+    "statement",
+    "sources",
+    "links",
+    "rationale",
+    "verification"
+  ],
+  "properties": {
+    "schema": {"const": "requirement/v1"},
+    "id": {
+      "type": "string",
+      "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*$"
+    },
+    "specification": {"enum": ["BRS", "StRS", "SyRS", "SRS"]},
+    "level": {
+      "enum": ["business", "stakeholder", "system", "software"]
+    },
+    "type": {
+      "enum": [
+        "functional",
+        "performance",
+        "interface",
+        "quality",
+        "constraint",
+        "safety",
+        "security"
+      ]
+    },
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["draft", "approved", "retired"]},
+    "owner": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "statement": {"type": "string", "minLength": 1},
+    "sources": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refines"],
+      "properties": {
+        "refines": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+          }
+        }
+      }
+    },
+    "rationale": {"type": "string", "minLength": 1},
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "criterion"],
+      "properties": {
+        "method": {
+          "enum": ["analysis", "demonstration", "inspection", "test"]
+        },
+        "criterion": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"level": {"const": "business"}}},
+      "then": {
+        "properties": {
+          "id": {"pattern": "^BR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
+          "specification": {"const": "BRS"},
+          "links": {
+            "properties": {"refines": {"maxItems": 0}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"level": {"const": "stakeholder"}}},
+      "then": {
+        "properties": {
+          "id": {"pattern": "^STR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
+          "specification": {"const": "StRS"},
+          "links": {
+            "properties": {
+              "refines": {
+                "minItems": 1,
+                "items": {
+                  "pattern": "^BR-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"level": {"const": "system"}}},
+      "then": {
+        "properties": {
+          "id": {"pattern": "^SYR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
+          "specification": {"const": "SyRS"},
+          "links": {
+            "properties": {
+              "refines": {
+                "minItems": 1,
+                "items": {
+                  "pattern": "^STR-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"level": {"const": "software"}}},
+      "then": {
+        "properties": {
+          "id": {"pattern": "^SWR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
+          "specification": {"const": "SRS"},
+          "links": {
+            "properties": {
+              "refines": {
+                "minItems": 1,
+                "items": {
+                  "pattern": "^SYR-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
