@@ -37,9 +37,20 @@ type AllowAll struct{}
 func (AllowAll) Authorize(context.Context, domain.Identity, string, string) error { return nil }
 
 type Service struct {
-	Store  ports.Store
-	Auth   ports.Authorizer
-	Events ports.EventSink
+	Store     ports.Store
+	Auth      ports.Authorizer
+	Events    ports.EventSink
+	LeaseWake chan<- struct{}
+}
+
+func (service Service) wakeLeaseScheduler() {
+	if service.LeaseWake == nil {
+		return
+	}
+	select {
+	case service.LeaseWake <- struct{}{}:
+	default:
+	}
 }
 
 func (service Service) authorize(ctx context.Context, actor, permission, resource string) error {
@@ -166,16 +177,19 @@ func (service Service) ListReadyRequirements(ctx context.Context, cursor string,
 	}
 	return service.Store.ListReadyRequirements(ctx, cursor, limit)
 }
-func (service Service) ConfirmRequirement(ctx context.Context, ref domain.RequirementRef, commit, result, actor string) (domain.Requirement, error) {
-	if err := service.authorize(ctx, actor, "requirement.confirm", ref.ID); err != nil {
+func (service Service) ConfirmRequirement(ctx context.Context, input domain.ConfirmationInput, actor string) (domain.Requirement, error) {
+	if err := service.authorize(ctx, actor, "requirement.confirm", input.Requirement.ID); err != nil {
 		return domain.Requirement{}, err
 	}
-	if commit == "" {
-		return domain.Requirement{}, errors.New("commit is required")
+	if err := domain.ValidateCommit(input.Commit); err != nil {
+		return domain.Requirement{}, err
 	}
-	item, err := service.Store.ConfirmRequirement(ctx, ref, commit, result, actor)
+	if input.PullRequest != nil && (input.PullRequest.Repository == "" || input.PullRequest.URL == "" || input.PullRequest.Number < 1) {
+		return domain.Requirement{}, errors.New("pull request repository, number, and URL are required")
+	}
+	item, err := service.Store.ConfirmRequirement(ctx, input, actor)
 	if err == nil {
-		service.event(ctx, "requirement.implemented", map[string]any{"requirement_id": ref.ID, "commit": commit})
+		service.event(ctx, "requirement.implemented", map[string]any{"requirement_id": input.Requirement.ID, "commit": input.Commit})
 	}
 	return item, err
 }
@@ -257,6 +271,7 @@ func (service Service) LeaseTask(ctx context.Context, id, agent string, ttl time
 	lease, err := service.Store.LeaseTask(ctx, id, agent, ttl, actor)
 	if err == nil {
 		service.event(ctx, "task.leased", map[string]any{"task_id": id, "agent_id": agent})
+		service.wakeLeaseScheduler()
 	}
 	return lease, err
 }
@@ -273,6 +288,7 @@ func (service Service) Heartbeat(ctx context.Context, id string, fence int, ttl 
 	lease, err := service.Store.Heartbeat(ctx, id, fence, ttl, actor)
 	if err == nil {
 		service.event(ctx, "lease.heartbeat", map[string]any{"lease_id": id, "task_id": lease.TaskID})
+		service.wakeLeaseScheduler()
 	}
 	return lease, err
 }
@@ -283,6 +299,7 @@ func (service Service) Release(ctx context.Context, id string, fence int, actor 
 	err := service.Store.Release(ctx, id, fence, actor)
 	if err == nil {
 		service.event(ctx, "lease.released", map[string]any{"lease_id": id})
+		service.wakeLeaseScheduler()
 	}
 	return err
 }
@@ -290,11 +307,33 @@ func (service Service) CompleteTask(ctx context.Context, id, lease string, fence
 	if err := service.authorize(ctx, actor, "task.complete", id); err != nil {
 		return domain.Task{}, err
 	}
+	if err := domain.ValidateCommit(commit); err != nil {
+		return domain.Task{}, err
+	}
 	task, err := service.Store.CompleteTask(ctx, id, lease, fence, commit, actor)
 	if err == nil {
 		service.event(ctx, "task.completed", map[string]any{"task_id": id, "commit": commit})
+		service.wakeLeaseScheduler()
 	}
 	return task, err
+}
+func (service Service) CloseTask(ctx context.Context, id, actor string) (domain.Task, error) {
+	if err := service.authorize(ctx, actor, "task.close", id); err != nil {
+		return domain.Task{}, err
+	}
+	task, err := service.Store.CloseTask(ctx, id, actor)
+	if err == nil {
+		service.event(ctx, "task.closed", map[string]any{"task_id": id})
+	}
+	return task, err
+}
+
+func (service Service) ExpireLeases(ctx context.Context) error {
+	err := service.Store.ExpireLeases(ctx, "system")
+	if err == nil {
+		service.event(ctx, "leases.expired", nil)
+	}
+	return err
 }
 func (service Service) LinkPullRequest(ctx context.Context, id string, pr domain.PullRequest, actor string) error {
 	if err := service.authorize(ctx, actor, "task.link_pr", id); err != nil {

@@ -27,9 +27,18 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(db); err != nil {
+	sqlDB, err := db.DB()
+	if err != nil {
 		return nil, err
 	}
+	// SQLite PRAGMA settings are connection-local. Use one connection while
+	// migrations temporarily change foreign-key enforcement.
+	sqlDB.SetMaxOpenConns(1)
+	if err := migrate(db); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(0)
 	return &Store{db: db}, nil
 }
 
@@ -112,6 +121,13 @@ type taskRequirementRow struct {
 
 func (taskRequirementRow) TableName() string { return "task_requirement" }
 
+type taskPullRequestRow struct {
+	TaskID        string `gorm:"primaryKey"`
+	PullRequestID int64  `gorm:"primaryKey"`
+}
+
+func (taskPullRequestRow) TableName() string { return "task_pull_request" }
+
 type leaseRow struct {
 	TaskID                            string `gorm:"primaryKey"`
 	LeaseID, AgentID                  string
@@ -121,6 +137,19 @@ type leaseRow struct {
 
 func (leaseRow) TableName() string { return "lease" }
 
+type stateHistoryRow struct {
+	Sequence   int64 `gorm:"primaryKey"`
+	EntityType string
+	EntityID   string
+	Field      string
+	FromValue  *string
+	ToValue    string
+	OccurredAt string
+	ActorID    string
+}
+
+func (stateHistoryRow) TableName() string { return "state_history" }
+
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func audit(ctx context.Context, tx *gorm.DB, actor, kind, entityType, entityID string, data any) error {
@@ -129,6 +158,45 @@ func audit(ctx context.Context, tx *gorm.DB, actor, kind, entityType, entityID s
 		return err
 	}
 	return tx.Exec(`INSERT INTO audit_event (occurred_at,actor_id,correlation_id,causation_id,kind,entity_type,entity_id,data_json) VALUES (?,?,?,?,?,?,?,?)`, now(), actor, ports.CorrelationID(ctx), ports.CausationID(ctx), kind, entityType, entityID, string(value)).Error
+}
+
+func recordState(tx *gorm.DB, entityType, entityID, field, from, to, actor string) error {
+	if from == to {
+		return nil
+	}
+	var previous *string
+	if from != "" {
+		previous = &from
+	}
+	return tx.Create(&stateHistoryRow{EntityType: entityType, EntityID: entityID, Field: field, FromValue: previous, ToValue: to, OccurredAt: now(), ActorID: actor}).Error
+}
+
+func setRequirementState(tx *gorm.DB, id string, state domain.ReconciliationState, actor string) error {
+	var row requirementRow
+	if err := tx.First(&row, "id=?", id).Error; err != nil {
+		return err
+	}
+	if row.ReconciliationState == string(state) {
+		return nil
+	}
+	if err := tx.Model(&requirementRow{}).Where("id=?", id).Updates(map[string]any{"reconciliation_state": string(state), "updated_at": now()}).Error; err != nil {
+		return err
+	}
+	return recordState(tx, "requirement", id, "reconciliation", row.ReconciliationState, string(state), actor)
+}
+
+func setTaskState(tx *gorm.DB, id, state, actor string) error {
+	var row taskRow
+	if err := tx.First(&row, "id=?", id).Error; err != nil {
+		return err
+	}
+	if row.State == state {
+		return nil
+	}
+	if err := tx.Model(&taskRow{}).Where("id=?", id).Updates(map[string]any{"state": state, "updated_at": now()}).Error; err != nil {
+		return err
+	}
+	return recordState(tx, "task", id, "state", row.State, state, actor)
 }
 
 func refs(input domain.RequirementInput) ([]domain.RequirementRef, error) {
@@ -204,6 +272,12 @@ func (store *Store) CreateRequirement(ctx context.Context, input domain.Requirem
 		if err := addRevision(tx, input, actor); err != nil {
 			return err
 		}
+		if err := recordState(tx, "requirement", input.ID, "lifecycle", "", string(domain.Active), actor); err != nil {
+			return err
+		}
+		if err := recordState(tx, "requirement", input.ID, "reconciliation", "", string(domain.Unimplemented), actor); err != nil {
+			return err
+		}
 		return audit(ctx, tx, actor, "requirement.created", "requirement", input.ID, map[string]any{"revision": input.Revision})
 	})
 	if err != nil {
@@ -237,7 +311,11 @@ func (store *Store) UpdateRequirement(ctx context.Context, input domain.Requirem
 		if err := addRevision(tx, input, actor); err != nil {
 			return err
 		}
+		previousState := current.ReconciliationState
 		if err := tx.Model(&requirementRow{}).Where("id=? AND current_revision=?", input.ID, expected).Updates(map[string]any{"current_revision": input.Revision, "reconciliation_state": string(domain.Unimplemented), "updated_at": now()}).Error; err != nil {
+			return err
+		}
+		if err := recordState(tx, "requirement", input.ID, "reconciliation", previousState, string(domain.Unimplemented), actor); err != nil {
 			return err
 		}
 		type descendant struct {
@@ -263,7 +341,7 @@ JOIN d ON rd.dependency_id=d.id
 			return err
 		}
 		for _, item := range items {
-			if err := tx.Model(&requirementRow{}).Where("id=?", item.ID).Updates(map[string]any{"reconciliation_state": string(domain.NeedsReconciliation), "updated_at": now()}).Error; err != nil {
+			if err := setRequirementState(tx, item.ID, domain.NeedsReconciliation, actor); err != nil {
 				return err
 			}
 			if err := tx.Exec(`INSERT OR IGNORE INTO reconciliation_cause (requirement_id,requirement_revision,cause_requirement_id,cause_revision,created_at) VALUES (?,?,?,?,?)`, item.ID, item.Revision, input.ID, input.Revision, now()).Error; err != nil {
@@ -279,6 +357,10 @@ JOIN d ON rd.dependency_id=d.id
 }
 
 func (store *Store) GetRequirement(ctx context.Context, ref domain.RequirementRef) (domain.Requirement, error) {
+	return store.getRequirement(ctx, ref, true)
+}
+
+func (store *Store) getRequirement(ctx context.Context, ref domain.RequirementRef, detail bool) (domain.Requirement, error) {
 	var root requirementRow
 	if err := store.db.WithContext(ctx).First(&root, "id=?", ref.ID).Error; err != nil {
 		return domain.Requirement{}, ErrNotFound
@@ -286,13 +368,120 @@ func (store *Store) GetRequirement(ctx context.Context, ref domain.RequirementRe
 	if ref.Revision == 0 {
 		ref.Revision = root.CurrentRevision
 	}
+	revision, err := store.loadRequirementRevision(ctx, ref)
+	if err != nil {
+		return domain.Requirement{}, ErrNotFound
+	}
+	effectiveState, err := effectiveRequirementState(store.db.WithContext(ctx), root.ID, root.CurrentRevision, domain.ReconciliationState(root.ReconciliationState))
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	item := domain.Requirement{ID: root.ID, CurrentRevision: root.CurrentRevision, LifecycleState: domain.LifecycleState(root.LifecycleState), ReconciliationState: effectiveState, Revision: revision}
+	if !detail {
+		return item, nil
+	}
+	var revisions []revisionRow
+	if err := store.db.WithContext(ctx).Where("requirement_id=?", ref.ID).Order("revision").Find(&revisions).Error; err != nil {
+		return domain.Requirement{}, err
+	}
+	item.RevisionHistory = make([]domain.RequirementRevision, 0, len(revisions))
+	for _, row := range revisions {
+		value, err := store.loadRequirementRevision(ctx, domain.RequirementRef{ID: ref.ID, Revision: row.Revision})
+		if err != nil {
+			return domain.Requirement{}, err
+		}
+		item.RevisionHistory = append(item.RevisionHistory, value)
+	}
+	item.StateHistory, err = store.stateHistory(ctx, "requirement", ref.ID)
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	hasChildren, err := hasActiveRefinementChildren(store.db.WithContext(ctx), root.ID, root.CurrentRevision)
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	if hasChildren {
+		filtered := item.StateHistory[:0]
+		for _, change := range item.StateHistory {
+			if change.Field != "reconciliation" {
+				filtered = append(filtered, change)
+			}
+		}
+		item.StateHistory = filtered
+	}
+	item.Confirmations, err = store.confirmations(ctx, ref.ID)
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	item.OpenCauses, err = store.openCauses(ctx, ref.ID, root.CurrentRevision)
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	readiness, err := store.requirementReadiness(ctx, item)
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	item.Readiness = &readiness
+	return item, nil
+}
+
+func hasActiveRefinementChildren(database *gorm.DB, id string, revision int) (bool, error) {
+	var count int64
+	err := database.Raw(`SELECT count(*) FROM requirement_refinement rr
+JOIN requirement child ON child.id=rr.child_id
+ AND child.current_revision=rr.child_revision
+ AND child.lifecycle_state='active'
+WHERE rr.parent_id=? AND rr.parent_revision=?`, id, revision).Scan(&count).Error
+	return count > 0, err
+}
+
+func effectiveRequirementState(database *gorm.DB, id string, revision int, stored domain.ReconciliationState) (domain.ReconciliationState, error) {
+	hasChildren, err := hasActiveRefinementChildren(database, id, revision)
+	if err != nil || !hasChildren {
+		return stored, err
+	}
+	var incompleteLeaves int64
+	query := `WITH RECURSIVE descendants(id,revision,reconciliation_state) AS (
+SELECT child.id,child.current_revision,child.reconciliation_state
+FROM requirement_refinement rr
+JOIN requirement child ON child.id=rr.child_id
+ AND child.current_revision=rr.child_revision
+ AND child.lifecycle_state='active'
+WHERE rr.parent_id=? AND rr.parent_revision=?
+UNION
+SELECT child.id,child.current_revision,child.reconciliation_state
+FROM requirement_refinement rr
+JOIN requirement child ON child.id=rr.child_id
+ AND child.current_revision=rr.child_revision
+ AND child.lifecycle_state='active'
+JOIN descendants parent ON rr.parent_id=parent.id AND rr.parent_revision=parent.revision
+)
+SELECT count(*) FROM descendants current
+WHERE NOT EXISTS (
+  SELECT 1 FROM requirement_refinement rr
+  JOIN requirement child ON child.id=rr.child_id
+   AND child.current_revision=rr.child_revision
+   AND child.lifecycle_state='active'
+  WHERE rr.parent_id=current.id AND rr.parent_revision=current.revision
+)
+AND current.reconciliation_state!='implemented'`
+	if err := database.Raw(query, id, revision).Scan(&incompleteLeaves).Error; err != nil {
+		return "", err
+	}
+	if incompleteLeaves == 0 {
+		return domain.Implemented, nil
+	}
+	return domain.Unimplemented, nil
+}
+
+func (store *Store) loadRequirementRevision(ctx context.Context, ref domain.RequirementRef) (domain.RequirementRevision, error) {
 	var rev revisionRow
 	if err := store.db.WithContext(ctx).First(&rev, "requirement_id=? AND revision=?", ref.ID, ref.Revision).Error; err != nil {
-		return domain.Requirement{}, ErrNotFound
+		return domain.RequirementRevision{}, err
 	}
 	var rows []refinementRow
 	if err := store.db.WithContext(ctx).Where("child_id=? AND child_revision=?", ref.ID, ref.Revision).Find(&rows).Error; err != nil {
-		return domain.Requirement{}, err
+		return domain.RequirementRevision{}, err
 	}
 	parents := make([]domain.RequirementRef, 0, len(rows))
 	for _, row := range rows {
@@ -300,21 +489,18 @@ func (store *Store) GetRequirement(ctx context.Context, ref domain.RequirementRe
 	}
 	var dependencyRows []requirementDependencyRow
 	if err := store.db.WithContext(ctx).Where("requirement_id=? AND requirement_revision=?", ref.ID, ref.Revision).Find(&dependencyRows).Error; err != nil {
-		return domain.Requirement{}, err
+		return domain.RequirementRevision{}, err
 	}
 	dependencies := make([]domain.RequirementRef, 0, len(dependencyRows))
 	for _, row := range dependencyRows {
 		dependencies = append(dependencies, domain.RequirementRef{ID: row.DependencyID, Revision: row.DependencyRevision})
 	}
 	created, _ := time.Parse(time.RFC3339Nano, rev.CreatedAt)
-	return domain.Requirement{ID: root.ID, CurrentRevision: root.CurrentRevision, LifecycleState: domain.LifecycleState(root.LifecycleState), ReconciliationState: domain.ReconciliationState(root.ReconciliationState), Revision: domain.RequirementRevision{RequirementID: rev.RequirementID, Revision: rev.Revision, Level: rev.Level, Title: rev.Title, Statement: rev.Statement, Parents: parents, Dependencies: dependencies, CreatedAt: created, ActorID: rev.ActorID}}, nil
+	return domain.RequirementRevision{RequirementID: rev.RequirementID, Revision: rev.Revision, Level: rev.Level, Title: rev.Title, Statement: rev.Statement, Parents: parents, Dependencies: dependencies, CreatedAt: created, ActorID: rev.ActorID}, nil
 }
 
 func (store *Store) ListRequirements(ctx context.Context, cursor string, limit int, level, state string) (domain.Page[domain.Requirement], error) {
-	query := store.db.WithContext(ctx).Model(&requirementRow{}).Where("id > ?", cursor).Order("id").Limit(limit + 1)
-	if state != "" {
-		query = query.Where("reconciliation_state=?", state)
-	}
+	query := store.db.WithContext(ctx).Model(&requirementRow{}).Where("id > ?", cursor).Order("id")
 	if level != "" {
 		query = query.Joins("JOIN requirement_revision rr ON rr.requirement_id=requirement.id AND rr.revision=requirement.current_revision").Where("rr.level=?", level)
 	}
@@ -322,17 +508,23 @@ func (store *Store) ListRequirements(ctx context.Context, cursor string, limit i
 	if err := query.Find(&rows).Error; err != nil {
 		return domain.Page[domain.Requirement]{}, err
 	}
-	page := domain.Page[domain.Requirement]{Items: []domain.Requirement{}}
-	if len(rows) > limit {
-		page.NextCursor = rows[limit-1].ID
-		rows = rows[:limit]
-	}
+	items := make([]domain.Requirement, 0, limit+1)
 	for _, row := range rows {
-		item, err := store.GetRequirement(ctx, domain.RequirementRef{ID: row.ID})
+		item, err := store.getRequirement(ctx, domain.RequirementRef{ID: row.ID}, false)
 		if err != nil {
-			return page, err
+			return domain.Page[domain.Requirement]{}, err
 		}
-		page.Items = append(page.Items, item)
+		if state == "" || string(item.ReconciliationState) == state {
+			items = append(items, item)
+			if len(items) == limit+1 {
+				break
+			}
+		}
+	}
+	page := domain.Page[domain.Requirement]{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		page.NextCursor = items[limit-1].ID
 	}
 	return page, nil
 }
@@ -341,55 +533,159 @@ func (store *Store) ListReadyRequirements(ctx context.Context, cursor string, li
 	query := store.db.WithContext(ctx).Model(&requirementRow{}).
 		Where("requirement.id > ?", cursor).
 		Where("requirement.lifecycle_state=?", domain.Active).
-		Where("requirement.reconciliation_state IN ?", []domain.ReconciliationState{domain.Unimplemented, domain.NeedsReconciliation}).
-		Where(`NOT EXISTS (
-SELECT 1 FROM task_requirement tr
-JOIN task t ON t.id=tr.task_id
-WHERE tr.requirement_id=requirement.id
-  AND tr.requirement_revision=requirement.current_revision
-  AND t.state!='complete'
-)`).
-		Where(requirementReadyDependenciesSQL).
-		Order("requirement.id").Limit(limit + 1)
+		Order("requirement.id")
 	var rows []requirementRow
 	if err := query.Find(&rows).Error; err != nil {
 		return domain.Page[domain.Requirement]{}, err
 	}
-	page := domain.Page[domain.Requirement]{Items: []domain.Requirement{}}
-	if len(rows) > limit {
-		page.NextCursor = rows[limit-1].ID
-		rows = rows[:limit]
-	}
+	items := make([]domain.Requirement, 0, limit+1)
 	for _, row := range rows {
-		item, err := store.GetRequirement(ctx, domain.RequirementRef{ID: row.ID})
+		item, err := store.getRequirement(ctx, domain.RequirementRef{ID: row.ID}, false)
 		if err != nil {
-			return page, err
+			return domain.Page[domain.Requirement]{}, err
 		}
-		page.Items = append(page.Items, item)
+		readiness, err := store.requirementReadiness(ctx, item)
+		if err != nil {
+			return domain.Page[domain.Requirement]{}, err
+		}
+		if readiness.Ready {
+			items = append(items, item)
+			if len(items) == limit+1 {
+				break
+			}
+		}
+	}
+	page := domain.Page[domain.Requirement]{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		page.NextCursor = items[limit-1].ID
 	}
 	return page, nil
 }
 
-const requirementReadyDependenciesSQL = `NOT EXISTS (
-WITH RECURSIVE deps(id, revision) AS (
-  SELECT rd.dependency_id, rd.dependency_revision
-  FROM requirement_dependency rd
-  WHERE rd.requirement_id=requirement.id
-    AND rd.requirement_revision=requirement.current_revision
-  UNION
-  SELECT rd.dependency_id, rd.dependency_revision
-  FROM requirement_dependency rd
-  JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
-)
-SELECT 1 FROM deps d
-LEFT JOIN requirement r ON r.id=d.id
-WHERE r.id IS NULL
-   OR r.current_revision!=d.revision
-   OR r.lifecycle_state!='active'
-   OR r.reconciliation_state!='implemented'
-)`
+func (store *Store) stateHistory(ctx context.Context, entityType, entityID string) ([]domain.StateChange, error) {
+	var rows []stateHistoryRow
+	if err := store.db.WithContext(ctx).Where("entity_type=? AND entity_id=?", entityType, entityID).Order("sequence").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]domain.StateChange, 0, len(rows))
+	for _, row := range rows {
+		occurred, _ := time.Parse(time.RFC3339Nano, row.OccurredAt)
+		from := ""
+		if row.FromValue != nil {
+			from = *row.FromValue
+		}
+		items = append(items, domain.StateChange{Sequence: row.Sequence, Field: row.Field, From: from, To: row.ToValue, OccurredAt: occurred, ActorID: row.ActorID})
+	}
+	return items, nil
+}
 
-func (store *Store) ConfirmRequirement(ctx context.Context, ref domain.RequirementRef, commit, result, actor string) (domain.Requirement, error) {
+func (store *Store) confirmations(ctx context.Context, requirementID string) ([]domain.Confirmation, error) {
+	type row struct {
+		Result, CommitSHA, TaskID, ConfirmedAt, ActorID string
+		Repository, URL                                 *string
+		Number                                          *int
+	}
+	var rows []row
+	query := `SELECT c.result,c.commit_sha,COALESCE(c.task_id,'') AS task_id,c.confirmed_at,c.actor_id,
+p.repository,p.number,p.url FROM reconciliation_confirmation c
+LEFT JOIN pull_request p ON p.id=c.pull_request_id
+WHERE c.requirement_id=? ORDER BY c.confirmed_at,c.id`
+	if err := store.db.WithContext(ctx).Raw(query, requirementID).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]domain.Confirmation, 0, len(rows))
+	for _, row := range rows {
+		confirmed, _ := time.Parse(time.RFC3339Nano, row.ConfirmedAt)
+		item := domain.Confirmation{Result: row.Result, Commit: row.CommitSHA, TaskID: row.TaskID, ConfirmedAt: confirmed, ActorID: row.ActorID}
+		if row.Repository != nil && row.Number != nil && row.URL != nil {
+			item.PullRequest = &domain.PullRequest{Repository: *row.Repository, Number: *row.Number, URL: *row.URL}
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (store *Store) openCauses(ctx context.Context, requirementID string, revision int) ([]domain.ReconciliationCause, error) {
+	type row struct {
+		CauseRequirementID string
+		CauseRevision      int
+		CreatedAt          string
+	}
+	var rows []row
+	if err := store.db.WithContext(ctx).Table("reconciliation_cause").Where("requirement_id=? AND requirement_revision=? AND resolved_at IS NULL", requirementID, revision).Order("created_at,cause_requirement_id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]domain.ReconciliationCause, 0, len(rows))
+	for _, row := range rows {
+		created, _ := time.Parse(time.RFC3339Nano, row.CreatedAt)
+		items = append(items, domain.ReconciliationCause{Requirement: domain.RequirementRef{ID: row.CauseRequirementID, Revision: row.CauseRevision}, CreatedAt: created})
+	}
+	return items, nil
+}
+
+func (store *Store) requirementReadiness(ctx context.Context, item domain.Requirement) (domain.Readiness, error) {
+	blockers := []string{}
+	if item.Revision.Revision != item.CurrentRevision {
+		blockers = append(blockers, fmt.Sprintf("revision %d is not current revision %d", item.Revision.Revision, item.CurrentRevision))
+	}
+	if item.LifecycleState != domain.Active {
+		blockers = append(blockers, "requirement is retired")
+	}
+	hasChildren, err := hasActiveRefinementChildren(store.db.WithContext(ctx), item.ID, item.CurrentRevision)
+	if err != nil {
+		return domain.Readiness{}, err
+	}
+	if hasChildren {
+		blockers = append(blockers, "requirement is not a leaf")
+	}
+	if item.ReconciliationState != domain.Unimplemented && item.ReconciliationState != domain.NeedsReconciliation {
+		blockers = append(blockers, fmt.Sprintf("reconciliation state is %s", item.ReconciliationState))
+	}
+	var taskIDs []string
+	if err := store.db.WithContext(ctx).Raw(`SELECT t.id FROM task t JOIN task_requirement tr ON tr.task_id=t.id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND t.state='open' ORDER BY t.id`, item.ID, item.CurrentRevision).Scan(&taskIDs).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	for _, id := range taskIDs {
+		blockers = append(blockers, fmt.Sprintf("open task %s already links to the current revision", id))
+	}
+	type dependency struct {
+		ID, LifecycleState, ReconciliationState string
+		Revision, CurrentRevision               int
+	}
+	var dependencies []dependency
+	query := `WITH RECURSIVE deps(id,revision) AS (
+SELECT dependency_id,dependency_revision FROM requirement_dependency WHERE requirement_id=? AND requirement_revision=?
+UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency rd JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
+) SELECT d.id,d.revision,r.current_revision,r.lifecycle_state,r.reconciliation_state FROM deps d LEFT JOIN requirement r ON r.id=d.id ORDER BY d.id,d.revision`
+	if err := store.db.WithContext(ctx).Raw(query, item.ID, item.CurrentRevision).Scan(&dependencies).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	for _, dependency := range dependencies {
+		ref := fmt.Sprintf("%s@%d", dependency.ID, dependency.Revision)
+		effectiveState := domain.ReconciliationState(dependency.ReconciliationState)
+		if dependency.CurrentRevision != 0 {
+			effectiveState, err = effectiveRequirementState(store.db.WithContext(ctx), dependency.ID, dependency.CurrentRevision, effectiveState)
+			if err != nil {
+				return domain.Readiness{}, err
+			}
+		}
+		switch {
+		case dependency.CurrentRevision == 0:
+			blockers = append(blockers, ref+" does not exist")
+		case dependency.CurrentRevision != dependency.Revision:
+			blockers = append(blockers, fmt.Sprintf("%s is stale; current revision is %d", ref, dependency.CurrentRevision))
+		case dependency.LifecycleState != string(domain.Active):
+			blockers = append(blockers, ref+" is retired")
+		case effectiveState != domain.Implemented:
+			blockers = append(blockers, fmt.Sprintf("%s is %s", ref, effectiveState))
+		}
+	}
+	return domain.Readiness{Ready: len(blockers) == 0, Blockers: blockers}, nil
+}
+
+func (store *Store) ConfirmRequirement(ctx context.Context, input domain.ConfirmationInput, actor string) (domain.Requirement, error) {
+	ref := input.Requirement
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root requirementRow
 		if err := tx.First(&root, "id=?", ref.ID).Error; err != nil {
@@ -404,22 +700,57 @@ func (store *Store) ConfirmRequirement(ctx context.Context, ref domain.Requireme
 		if root.LifecycleState == string(domain.Retired) {
 			return friendlyConflict{message: fmt.Sprintf("requirement %s is retired", ref.ID)}
 		}
-		if result == "" {
-			result = "code_changed"
+		hasChildren, err := hasActiveRefinementChildren(tx, ref.ID, ref.Revision)
+		if err != nil {
+			return err
 		}
-		if result != "code_changed" && result != "existing_code_confirmed" {
+		if hasChildren {
+			return friendlyConflict{message: fmt.Sprintf("requirement %s@%d is not a leaf; confirm its refinement children", ref.ID, ref.Revision)}
+		}
+		if input.Result == "" {
+			input.Result = "code_changed"
+		}
+		if input.Result != "code_changed" && input.Result != "existing_code_confirmed" {
 			return errors.New("invalid confirmation result")
 		}
-		if err := tx.Exec(`INSERT INTO reconciliation_confirmation (requirement_id,requirement_revision,result,commit_sha,confirmed_at,actor_id) VALUES (?,?,?,?,?,?)`, ref.ID, ref.Revision, result, commit, now(), actor).Error; err != nil {
+		var taskID any
+		if input.TaskID != "" {
+			var task taskRow
+			if err := tx.First(&task, "id=?", input.TaskID).Error; err != nil {
+				return friendlyNotFound{message: fmt.Sprintf("task %s does not exist", input.TaskID)}
+			}
+			if task.State != "complete" || task.CompletedCommit == nil || *task.CompletedCommit != input.Commit {
+				return friendlyConflict{message: fmt.Sprintf("task %s is not complete at commit %s", input.TaskID, input.Commit)}
+			}
+			taskID = input.TaskID
+		}
+		var pullRequestID any
+		if input.PullRequest != nil {
+			id, err := upsertPullRequest(tx, *input.PullRequest)
+			if err != nil {
+				return err
+			}
+			pullRequestID = id
+			if input.TaskID != "" {
+				var links int64
+				if err := tx.Model(&taskPullRequestRow{}).Where("task_id=? AND pull_request_id=?", input.TaskID, id).Count(&links).Error; err != nil {
+					return err
+				}
+				if links == 0 {
+					return friendlyConflict{message: fmt.Sprintf("pull request %s is not linked to task %s", input.PullRequest.URL, input.TaskID)}
+				}
+			}
+		}
+		if err := tx.Exec(`INSERT INTO reconciliation_confirmation (requirement_id,requirement_revision,result,commit_sha,task_id,pull_request_id,confirmed_at,actor_id) VALUES (?,?,?,?,?,?,?,?)`, ref.ID, ref.Revision, input.Result, input.Commit, taskID, pullRequestID, now(), actor).Error; err != nil {
 			return err
 		}
 		if err := tx.Exec(`UPDATE reconciliation_cause SET resolved_at=? WHERE requirement_id=? AND requirement_revision=? AND resolved_at IS NULL`, now(), ref.ID, ref.Revision).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&requirementRow{}).Where("id=?", ref.ID).Updates(map[string]any{"reconciliation_state": string(domain.Implemented), "updated_at": now()}).Error; err != nil {
+		if err := setRequirementState(tx, ref.ID, domain.Implemented, actor); err != nil {
 			return err
 		}
-		return audit(ctx, tx, actor, "requirement.confirmed", "requirement", ref.ID, map[string]any{"revision": ref.Revision, "commit": commit, "result": result})
+		return audit(ctx, tx, actor, "requirement.confirmed", "requirement", ref.ID, map[string]any{"revision": ref.Revision, "commit": input.Commit, "result": input.Result, "task": input.TaskID})
 	})
 	if err != nil {
 		return domain.Requirement{}, err
@@ -437,6 +768,9 @@ func (store *Store) RetireRequirement(ctx context.Context, id, actor string) (do
 			return friendlyConflict{message: fmt.Sprintf("requirement %s is already retired", id)}
 		}
 		if err := tx.Model(&requirementRow{}).Where("id=?", id).Updates(map[string]any{"lifecycle_state": string(domain.Retired), "updated_at": now()}).Error; err != nil {
+			return err
+		}
+		if err := recordState(tx, "requirement", id, "lifecycle", root.LifecycleState, string(domain.Retired), actor); err != nil {
 			return err
 		}
 		type downstream struct {
@@ -462,7 +796,7 @@ JOIN d ON rd.dependency_id=d.id
 			return err
 		}
 		for _, item := range items {
-			if err := tx.Model(&requirementRow{}).Where("id=? AND lifecycle_state='active'", item.ID).Updates(map[string]any{"reconciliation_state": string(domain.NeedsReconciliation), "updated_at": now()}).Error; err != nil {
+			if err := setRequirementState(tx, item.ID, domain.NeedsReconciliation, actor); err != nil {
 				return err
 			}
 			if err := tx.Exec(`INSERT OR IGNORE INTO reconciliation_cause (requirement_id,requirement_revision,cause_requirement_id,cause_revision,created_at) VALUES (?,?,?,?,?)`, item.ID, item.Revision, id, root.CurrentRevision, now()).Error; err != nil {
@@ -513,7 +847,7 @@ JOIN d ON rd.dependency_id=d.id
 	}
 	items := make([]domain.Requirement, 0, len(ids))
 	for _, id := range ids {
-		item, err := store.GetRequirement(ctx, domain.RequirementRef{ID: id})
+		item, err := store.getRequirement(ctx, domain.RequirementRef{ID: id}, false)
 		if err != nil {
 			return nil, err
 		}
@@ -548,7 +882,7 @@ func (store *Store) TasksForRequirements(ctx context.Context, refs []domain.Requ
 	sort.Strings(ordered)
 	tasks := make([]domain.Task, 0, len(ordered))
 	for _, id := range ordered {
-		task, err := store.GetTask(ctx, id)
+		task, err := store.getTask(ctx, id, false)
 		if err != nil {
 			return nil, err
 		}
@@ -562,6 +896,9 @@ func (store *Store) CreateTask(ctx context.Context, input domain.TaskInput, acto
 		stamp := now()
 		if err := tx.Create(&taskRow{ID: input.ID, Version: 1, Title: input.Title, Description: input.Description, Priority: input.Priority, State: "open", CreatedAt: stamp, UpdatedAt: stamp}).Error; err != nil {
 			return friendlyConflict{message: fmt.Sprintf("task %s already exists", input.ID)}
+		}
+		if err := recordState(tx, "task", input.ID, "state", "", "open", actor); err != nil {
+			return err
 		}
 		for _, dep := range input.DependsOn {
 			var n int64
@@ -584,6 +921,13 @@ func (store *Store) CreateTask(ctx context.Context, input domain.TaskInput, acto
 			if count == 0 {
 				return friendlyNotFound{message: fmt.Sprintf("requirement %s@%d does not exist", ref.ID, ref.Revision)}
 			}
+			hasChildren, err := hasActiveRefinementChildren(tx, ref.ID, ref.Revision)
+			if err != nil {
+				return err
+			}
+			if hasChildren {
+				return friendlyConflict{message: fmt.Sprintf("requirement %s@%d is not a leaf; link work to its refinement children", ref.ID, ref.Revision)}
+			}
 			if err := tx.Create(&taskRequirementRow{input.ID, ref.ID, ref.Revision, link.Purpose}).Error; err != nil {
 				return err
 			}
@@ -597,6 +941,10 @@ func (store *Store) CreateTask(ctx context.Context, input domain.TaskInput, acto
 }
 
 func (store *Store) GetTask(ctx context.Context, id string) (domain.Task, error) {
+	return store.getTask(ctx, id, true)
+}
+
+func (store *Store) getTask(ctx context.Context, id string, detail bool) (domain.Task, error) {
 	var row taskRow
 	if err := store.db.WithContext(ctx).First(&row, "id=?", id).Error; err != nil {
 		return domain.Task{}, ErrNotFound
@@ -613,52 +961,82 @@ func (store *Store) GetTask(ctx context.Context, id string) (domain.Task, error)
 	if row.CompletedCommit != nil {
 		commit = *row.CompletedCommit
 	}
-	return domain.Task{ID: row.ID, Version: row.Version, Title: row.Title, Description: row.Description, Priority: row.Priority, State: row.State, Fence: row.Fence, CompletedCommit: commit, Requirements: reqs, DependsOn: deps}, nil
+	item := domain.Task{ID: row.ID, Version: row.Version, Title: row.Title, Description: row.Description, Priority: row.Priority, State: row.State, Fence: row.Fence, CompletedCommit: commit, Requirements: reqs, DependsOn: deps}
+	type pullRequestRow struct {
+		Repository string
+		Number     int
+		URL        string
+	}
+	var pullRequests []pullRequestRow
+	query := `SELECT p.repository,p.number,p.url FROM pull_request p JOIN task_pull_request tpr ON tpr.pull_request_id=p.id WHERE tpr.task_id=? ORDER BY p.repository,p.number`
+	if err := store.db.WithContext(ctx).Raw(query, id).Scan(&pullRequests).Error; err != nil {
+		return domain.Task{}, err
+	}
+	item.PullRequests = make([]domain.PullRequest, 0, len(pullRequests))
+	for _, pr := range pullRequests {
+		item.PullRequests = append(item.PullRequests, domain.PullRequest{Repository: pr.Repository, Number: pr.Number, URL: pr.URL})
+	}
+	if !detail {
+		return item, nil
+	}
+	stateHistory, err := store.stateHistory(ctx, "task", id)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	item.StateHistory = stateHistory
+	readiness, err := store.taskReadiness(ctx, item)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	item.Readiness = &readiness
+	return item, nil
 }
 
 func (store *Store) ListTasks(ctx context.Context, cursor string, limit int, ready bool) (domain.Page[domain.Task], error) {
 	query := store.db.WithContext(ctx).Model(&taskRow{}).Where("task.id > ?", cursor)
 	if ready {
-		query = query.Where("task.state='open'").Where(`NOT EXISTS (SELECT 1 FROM lease WHERE lease.task_id=task.id AND lease.expires_at>?)`, now()).Where(`NOT EXISTS (SELECT 1 FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=task.id AND t.state!='complete')`).Where(`NOT EXISTS (SELECT 1 FROM task_requirement tr JOIN requirement r ON r.id=tr.requirement_id WHERE tr.task_id=task.id AND r.lifecycle_state!='active')`).Where(requirementDependenciesReadySQL).Order("priority DESC,id")
+		query = query.Where("task.state='open'").Order("priority DESC,id")
 	} else {
 		query = query.Order("id")
 	}
 	var rows []taskRow
-	if err := query.Limit(limit + 1).Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return domain.Page[domain.Task]{}, err
 	}
-	page := domain.Page[domain.Task]{Items: []domain.Task{}}
-	if len(rows) > limit {
-		page.NextCursor = rows[limit-1].ID
-		rows = rows[:limit]
-	}
+	items := make([]domain.Task, 0, limit+1)
 	for _, r := range rows {
-		t, e := store.GetTask(ctx, r.ID)
+		t, e := store.getTask(ctx, r.ID, false)
 		if e != nil {
-			return page, e
+			return domain.Page[domain.Task]{}, e
 		}
-		page.Items = append(page.Items, t)
+		if ready {
+			readiness, err := store.taskReadiness(ctx, t)
+			if err != nil {
+				return domain.Page[domain.Task]{}, err
+			}
+			if !readiness.Ready {
+				continue
+			}
+		}
+		items = append(items, t)
+		if len(items) == limit+1 {
+			break
+		}
+	}
+	page := domain.Page[domain.Task]{Items: items}
+	if len(items) > limit {
+		page.Items = items[:limit]
+		page.NextCursor = items[limit-1].ID
 	}
 	return page, nil
 }
 
-const requirementDependenciesReadySQL = `NOT EXISTS (
-WITH RECURSIVE deps(id, revision) AS (
-  SELECT rd.dependency_id, rd.dependency_revision
-  FROM task_requirement tr
-  JOIN requirement_dependency rd ON rd.requirement_id=tr.requirement_id AND rd.requirement_revision=tr.requirement_revision
-  WHERE tr.task_id=task.id
-  UNION
-  SELECT rd.dependency_id, rd.dependency_revision
-  FROM requirement_dependency rd
-  JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
-)
-SELECT 1 FROM deps d
-LEFT JOIN requirement r ON r.id=d.id
-WHERE r.id IS NULL OR r.current_revision!=d.revision OR r.lifecycle_state!='active' OR r.reconciliation_state!='implemented'
-)`
-
 func unmetRequirementDependencies(tx *gorm.DB, taskID string) (int64, error) {
+	type dependency struct {
+		ID, LifecycleState, ReconciliationState string
+		Revision, CurrentRevision               int
+	}
+	var dependencies []dependency
 	query := `WITH RECURSIVE deps(id, revision) AS (
 SELECT rd.dependency_id, rd.dependency_revision
 FROM task_requirement tr
@@ -669,11 +1047,106 @@ SELECT rd.dependency_id, rd.dependency_revision
 FROM requirement_dependency rd
 JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
 )
-SELECT count(*) FROM deps d
+SELECT d.id,d.revision,r.current_revision,r.lifecycle_state,r.reconciliation_state FROM deps d
 LEFT JOIN requirement r ON r.id=d.id
-WHERE r.id IS NULL OR r.current_revision!=d.revision OR r.lifecycle_state!='active' OR r.reconciliation_state!='implemented'`
+ORDER BY d.id,d.revision`
+	if err := tx.Raw(query, taskID).Scan(&dependencies).Error; err != nil {
+		return 0, err
+	}
 	var count int64
-	return count, tx.Raw(query, taskID).Scan(&count).Error
+	for _, dependency := range dependencies {
+		if dependency.CurrentRevision == 0 || dependency.CurrentRevision != dependency.Revision || dependency.LifecycleState != string(domain.Active) {
+			count++
+			continue
+		}
+		state, err := effectiveRequirementState(tx, dependency.ID, dependency.CurrentRevision, domain.ReconciliationState(dependency.ReconciliationState))
+		if err != nil {
+			return 0, err
+		}
+		if state != domain.Implemented {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (store *Store) taskReadiness(ctx context.Context, item domain.Task) (domain.Readiness, error) {
+	blockers := []string{}
+	if item.State != "open" {
+		blockers = append(blockers, fmt.Sprintf("task state is %s", item.State))
+	}
+	var leases []leaseRow
+	if err := store.db.WithContext(ctx).Where("task_id=? AND expires_at>?", item.ID, now()).Find(&leases).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	if len(leases) > 0 {
+		blockers = append(blockers, fmt.Sprintf("active lease %s belongs to %s", leases[0].LeaseID, leases[0].AgentID))
+	}
+	type taskDependency struct{ ID, State string }
+	var taskDependencies []taskDependency
+	if err := store.db.WithContext(ctx).Raw(`SELECT t.id,t.state FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=? AND t.state!='complete' ORDER BY t.id`, item.ID).Scan(&taskDependencies).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	for _, dependency := range taskDependencies {
+		blockers = append(blockers, fmt.Sprintf("task dependency %s is %s", dependency.ID, dependency.State))
+	}
+	type requirementDependency struct {
+		ID, LifecycleState, ReconciliationState string
+		Revision, CurrentRevision               int
+	}
+	var requirements []requirementDependency
+	query := `WITH RECURSIVE deps(id,revision) AS (
+SELECT rd.dependency_id,rd.dependency_revision FROM task_requirement tr JOIN requirement_dependency rd ON rd.requirement_id=tr.requirement_id AND rd.requirement_revision=tr.requirement_revision WHERE tr.task_id=?
+UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency rd JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
+) SELECT d.id,d.revision,r.current_revision,r.lifecycle_state,r.reconciliation_state FROM deps d LEFT JOIN requirement r ON r.id=d.id ORDER BY d.id,d.revision`
+	if err := store.db.WithContext(ctx).Raw(query, item.ID).Scan(&requirements).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	for _, requirement := range requirements {
+		ref := fmt.Sprintf("%s@%d", requirement.ID, requirement.Revision)
+		effectiveState := domain.ReconciliationState(requirement.ReconciliationState)
+		if requirement.CurrentRevision != 0 {
+			var stateErr error
+			effectiveState, stateErr = effectiveRequirementState(store.db.WithContext(ctx), requirement.ID, requirement.CurrentRevision, effectiveState)
+			if stateErr != nil {
+				return domain.Readiness{}, stateErr
+			}
+		}
+		switch {
+		case requirement.CurrentRevision == 0:
+			blockers = append(blockers, ref+" does not exist")
+		case requirement.CurrentRevision != requirement.Revision:
+			blockers = append(blockers, fmt.Sprintf("%s is stale; current revision is %d", ref, requirement.CurrentRevision))
+		case requirement.LifecycleState != string(domain.Active):
+			blockers = append(blockers, ref+" is retired")
+		case effectiveState != domain.Implemented:
+			blockers = append(blockers, fmt.Sprintf("%s is %s", ref, effectiveState))
+		}
+	}
+	var retiredLinks []string
+	if err := store.db.WithContext(ctx).Raw(`SELECT r.id FROM task_requirement tr JOIN requirement r ON r.id=tr.requirement_id WHERE tr.task_id=? AND r.lifecycle_state!='active' ORDER BY r.id`, item.ID).Scan(&retiredLinks).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	for _, id := range retiredLinks {
+		blockers = append(blockers, fmt.Sprintf("linked requirement %s is retired", id))
+	}
+	var nonLeafLinks []string
+	nonLeafQuery := `SELECT DISTINCT tr.requirement_id FROM task_requirement tr
+WHERE tr.task_id=? AND EXISTS (
+  SELECT 1 FROM requirement_refinement rr
+  JOIN requirement child ON child.id=rr.child_id
+   AND child.current_revision=rr.child_revision
+   AND child.lifecycle_state='active'
+  WHERE rr.parent_id=tr.requirement_id
+    AND rr.parent_revision=tr.requirement_revision
+) ORDER BY tr.requirement_id`
+	if err := store.db.WithContext(ctx).Raw(nonLeafQuery, item.ID).Scan(&nonLeafLinks).Error; err != nil {
+		return domain.Readiness{}, err
+	}
+	for _, id := range nonLeafLinks {
+		blockers = append(blockers, fmt.Sprintf("linked requirement %s is not a leaf", id))
+	}
+	return domain.Readiness{Ready: len(blockers) == 0, Blockers: blockers}, nil
 }
 
 func (store *Store) LeaseTask(ctx context.Context, id, agent string, ttl time.Duration, actor string) (domain.Lease, error) {
@@ -692,6 +1165,17 @@ func (store *Store) LeaseTask(ctx context.Context, id, agent string, ttl time.Du
 		}
 		if retiredLinks > 0 {
 			return friendlyConflict{message: fmt.Sprintf("task %s links to a retired requirement", id)}
+		}
+		var nonLeafLinks int64
+		if err := tx.Raw(`SELECT count(*) FROM task_requirement tr WHERE tr.task_id=? AND EXISTS (
+SELECT 1 FROM requirement_refinement rr
+JOIN requirement child ON child.id=rr.child_id AND child.current_revision=rr.child_revision AND child.lifecycle_state='active'
+WHERE rr.parent_id=tr.requirement_id AND rr.parent_revision=tr.requirement_revision
+)`, id).Scan(&nonLeafLinks).Error; err != nil {
+			return err
+		}
+		if nonLeafLinks > 0 {
+			return friendlyConflict{message: fmt.Sprintf("task %s links to a requirement that is not a leaf", id)}
 		}
 		var blockers int64
 		tx.Raw(`SELECT count(*) FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=? AND t.state!='complete'`, id).Scan(&blockers)
@@ -718,8 +1202,18 @@ func (store *Store) LeaseTask(ctx context.Context, id, agent string, ttl time.Du
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		tx.Model(&taskRow{}).Where("id=?", id).Updates(map[string]any{"fence": fence, "updated_at": now()})
-		tx.Exec(`UPDATE requirement SET reconciliation_state='in_progress',updated_at=? WHERE id IN (SELECT requirement_id FROM task_requirement WHERE task_id=?)`, now(), id)
+		if err := tx.Model(&taskRow{}).Where("id=?", id).Updates(map[string]any{"fence": fence, "updated_at": now()}).Error; err != nil {
+			return err
+		}
+		var requirementIDs []string
+		if err := tx.Model(&taskRequirementRow{}).Where("task_id=?", id).Distinct().Pluck("requirement_id", &requirementIDs).Error; err != nil {
+			return err
+		}
+		for _, requirementID := range requirementIDs {
+			if err := setRequirementState(tx, requirementID, domain.InProgress, actor); err != nil {
+				return err
+			}
+		}
 		if err := audit(ctx, tx, actor, "task.leased", "task", id, map[string]any{"lease": leaseID, "agent": agent}); err != nil {
 			return err
 		}
@@ -790,7 +1284,7 @@ func (store *Store) Release(ctx context.Context, id string, fence int, actor str
 		if err := tx.Delete(&lease).Error; err != nil {
 			return err
 		}
-		if err := refreshTaskRequirements(tx, lease.TaskID); err != nil {
+		if err := refreshTaskRequirements(ctx, tx, lease.TaskID, actor); err != nil {
 			return err
 		}
 		return audit(ctx, tx, actor, "lease.released", "lease", id, nil)
@@ -804,13 +1298,20 @@ func (store *Store) CompleteTask(ctx context.Context, taskID, leaseID string, fe
 			return ErrConflict
 		}
 		stamp := now()
+		var task taskRow
+		if err := tx.First(&task, "id=?", taskID).Error; err != nil {
+			return err
+		}
 		if err := tx.Model(&taskRow{}).Where("id=?", taskID).Updates(map[string]any{"state": "complete", "completed_commit": commit, "completed_at": stamp, "updated_at": stamp}).Error; err != nil {
+			return err
+		}
+		if err := recordState(tx, "task", taskID, "state", task.State, "complete", actor); err != nil {
 			return err
 		}
 		if err := tx.Delete(&lease).Error; err != nil {
 			return err
 		}
-		if err := refreshTaskRequirements(tx, taskID); err != nil {
+		if err := refreshTaskRequirements(ctx, tx, taskID, actor); err != nil {
 			return err
 		}
 		return audit(ctx, tx, actor, "task.completed", "task", taskID, map[string]any{"commit": commit})
@@ -821,13 +1322,17 @@ func (store *Store) CompleteTask(ctx context.Context, taskID, leaseID string, fe
 	return store.GetTask(ctx, taskID)
 }
 
-func refreshTaskRequirements(tx *gorm.DB, taskID string) error {
+func refreshTaskRequirements(ctx context.Context, tx *gorm.DB, taskID, actor string) error {
 	var links []taskRequirementRow
 	if err := tx.Where("task_id=?", taskID).Find(&links).Error; err != nil {
 		return err
 	}
 	for _, link := range links {
 		state := string(domain.Unimplemented)
+		var activeLeases int64
+		if err := tx.Raw(`SELECT count(*) FROM lease l JOIN task_requirement tr ON tr.task_id=l.task_id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND l.expires_at>?`, link.RequirementID, link.RequirementRevision, now()).Scan(&activeLeases).Error; err != nil {
+			return err
+		}
 		var confirmations int64
 		if err := tx.Table("reconciliation_confirmation").Where("requirement_id=? AND requirement_revision=?", link.RequirementID, link.RequirementRevision).Count(&confirmations).Error; err != nil {
 			return err
@@ -836,16 +1341,95 @@ func refreshTaskRequirements(tx *gorm.DB, taskID string) error {
 		if err := tx.Table("reconciliation_cause").Where("requirement_id=? AND requirement_revision=? AND resolved_at IS NULL", link.RequirementID, link.RequirementRevision).Count(&causes).Error; err != nil {
 			return err
 		}
-		if causes > 0 {
+		var completedAfterConfirmation int64
+		if err := tx.Raw(`SELECT count(*) FROM task t JOIN task_requirement tr ON tr.task_id=t.id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND t.state='complete' AND t.completed_at>COALESCE((SELECT max(confirmed_at) FROM reconciliation_confirmation WHERE requirement_id=? AND requirement_revision=?),'')`, link.RequirementID, link.RequirementRevision, link.RequirementID, link.RequirementRevision).Scan(&completedAfterConfirmation).Error; err != nil {
+			return err
+		}
+		if activeLeases > 0 {
+			state = string(domain.InProgress)
+		} else if completedAfterConfirmation > 0 {
+			state = string(domain.ReadyForReview)
+		} else if causes > 0 {
 			state = string(domain.NeedsReconciliation)
 		} else if confirmations > 0 {
 			state = string(domain.Implemented)
 		}
-		if err := tx.Model(&requirementRow{}).Where("id=? AND current_revision=?", link.RequirementID, link.RequirementRevision).Updates(map[string]any{"reconciliation_state": state, "updated_at": now()}).Error; err != nil {
+		var current requirementRow
+		if err := tx.First(&current, "id=? AND current_revision=?", link.RequirementID, link.RequirementRevision).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		if err := setRequirementState(tx, link.RequirementID, domain.ReconciliationState(state), actor); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (store *Store) CloseTask(ctx context.Context, id, actor string) (domain.Task, error) {
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task taskRow
+		if err := tx.First(&task, "id=?", id).Error; err != nil {
+			return ErrNotFound
+		}
+		if task.State != "open" {
+			return friendlyConflict{message: fmt.Sprintf("task %s is %s", id, task.State)}
+		}
+		var leases int64
+		if err := tx.Model(&leaseRow{}).Where("task_id=? AND expires_at>?", id, now()).Count(&leases).Error; err != nil {
+			return err
+		}
+		if leases > 0 {
+			return friendlyConflict{message: fmt.Sprintf("task %s has an active lease", id)}
+		}
+		if err := setTaskState(tx, id, "closed", actor); err != nil {
+			return err
+		}
+		if err := refreshTaskRequirements(ctx, tx, id, actor); err != nil {
+			return err
+		}
+		return audit(ctx, tx, actor, "task.closed", "task", id, nil)
+	})
+	if err != nil {
+		return domain.Task{}, err
+	}
+	return store.GetTask(ctx, id)
+}
+
+func (store *Store) ExpireLeases(ctx context.Context, actor string) error {
+	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var leases []leaseRow
+		if err := tx.Where("expires_at<=?", now()).Find(&leases).Error; err != nil {
+			return err
+		}
+		for _, lease := range leases {
+			if err := tx.Delete(&lease).Error; err != nil {
+				return err
+			}
+			if err := refreshTaskRequirements(ctx, tx, lease.TaskID, actor); err != nil {
+				return err
+			}
+			if err := audit(ctx, tx, actor, "lease.expired", "lease", lease.LeaseID, map[string]any{"task": lease.TaskID}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (store *Store) NextLeaseExpiry(ctx context.Context) (time.Time, bool, error) {
+	type result struct{ Value *string }
+	var row result
+	if err := store.db.WithContext(ctx).Raw(`SELECT min(expires_at) AS value FROM lease`).Scan(&row).Error; err != nil {
+		return time.Time{}, false, err
+	}
+	if row.Value == nil {
+		return time.Time{}, false, nil
+	}
+	value, err := time.Parse(time.RFC3339Nano, *row.Value)
+	return value, true, err
 }
 
 func (store *Store) LinkPullRequest(ctx context.Context, taskID string, pr domain.PullRequest, actor string) error {
@@ -854,8 +1438,8 @@ func (store *Store) LinkPullRequest(ctx context.Context, taskID string, pr domai
 		if err := tx.First(&task, "id=?", taskID).Error; err != nil {
 			return ErrNotFound
 		}
-		var id int64
-		if err := tx.Raw(`INSERT INTO pull_request(repository,number,url) VALUES(?,?,?) ON CONFLICT(repository,number) DO UPDATE SET url=excluded.url RETURNING id`, pr.Repository, pr.Number, pr.URL).Scan(&id).Error; err != nil {
+		id, err := upsertPullRequest(tx, pr)
+		if err != nil {
 			return err
 		}
 		if err := tx.Exec(`INSERT OR IGNORE INTO task_pull_request(task_id,pull_request_id) VALUES(?,?)`, taskID, id).Error; err != nil {
@@ -863,6 +1447,12 @@ func (store *Store) LinkPullRequest(ctx context.Context, taskID string, pr domai
 		}
 		return audit(ctx, tx, actor, "task.pr_linked", "task", taskID, map[string]any{"url": pr.URL})
 	})
+}
+
+func upsertPullRequest(tx *gorm.DB, pr domain.PullRequest) (int64, error) {
+	var id int64
+	err := tx.Raw(`INSERT INTO pull_request(repository,number,url) VALUES(?,?,?) ON CONFLICT(repository,number) DO UPDATE SET url=excluded.url RETURNING id`, pr.Repository, pr.Number, pr.URL).Scan(&id).Error
+	return id, err
 }
 
 func (store *Store) ListAudit(ctx context.Context, entity, cursor string, limit int) (domain.Page[domain.AuditEvent], error) {

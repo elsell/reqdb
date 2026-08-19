@@ -17,3 +17,8 @@ var RequirementDependencyMigration string
 //
 //go:embed requirement_lifecycle.sql
 var RequirementLifecycleMigration string
+
+// WorkflowStateMigration adds review, closed-task, and state-history support.
+//
+//go:embed workflow_state.sql
+var WorkflowStateMigration string

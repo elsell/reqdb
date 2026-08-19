@@ -7,7 +7,7 @@ CREATE TABLE requirement (
     reconciliation_state TEXT NOT NULL
         CHECK (reconciliation_state IN (
             'unimplemented', 'in_progress', 'implemented',
-            'needs_reconciliation'
+            'needs_reconciliation', 'ready_for_review'
         )),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -111,7 +111,7 @@ CREATE TABLE task (
     title TEXT NOT NULL CHECK (length(title) > 0),
     description TEXT NOT NULL CHECK (length(description) > 0),
     priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 100),
-    state TEXT NOT NULL CHECK (state IN ('open', 'blocked', 'complete')),
+    state TEXT NOT NULL CHECK (state IN ('open', 'complete', 'closed')),
     fence INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
     completed_commit TEXT,
     completed_at TEXT,
@@ -232,6 +232,20 @@ CREATE TABLE audit_event (
 
 CREATE INDEX audit_event_entity
     ON audit_event(entity_type, entity_id, sequence);
+
+CREATE TABLE state_history (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('requirement', 'task')),
+    entity_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    from_value TEXT,
+    to_value TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    actor_id TEXT NOT NULL
+);
+
+CREATE INDEX state_history_entity
+    ON state_history(entity_type, entity_id, sequence);
 
 CREATE TRIGGER audit_event_no_update
 BEFORE UPDATE ON audit_event

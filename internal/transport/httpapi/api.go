@@ -256,14 +256,16 @@ func (api API) requirements(w http.ResponseWriter, r *http.Request, parts []stri
 	}
 	if len(parts) == 2 && parts[1] == "confirm" && r.Method == http.MethodPost {
 		var body struct {
-			Commit string `json:"commit"`
-			Result string `json:"result"`
+			Commit      string              `json:"commit"`
+			Result      string              `json:"result"`
+			TaskID      string              `json:"task_id"`
+			PullRequest *domain.PullRequest `json:"pull_request"`
 		}
 		if err := decode(r, &body); err != nil {
 			fail(w, r, err)
 			return
 		}
-		item, err := api.Service.ConfirmRequirement(r.Context(), ref, body.Commit, body.Result, actor(r))
+		item, err := api.Service.ConfirmRequirement(r.Context(), domain.ConfirmationInput{Requirement: ref, Commit: body.Commit, Result: body.Result, TaskID: body.TaskID, PullRequest: body.PullRequest}, actor(r))
 		if err != nil {
 			fail(w, r, err)
 			return
@@ -358,6 +360,15 @@ func (api API) tasks(w http.ResponseWriter, r *http.Request, parts []string) {
 			return
 		}
 		item, err := api.Service.CompleteTask(r.Context(), id, body.Lease, body.Fence, body.Commit, actor(r))
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		write(w, r, 200, item, "")
+		return
+	}
+	if len(parts) == 2 && parts[1] == "close" && r.Method == http.MethodPost {
+		item, err := api.Service.CloseTask(r.Context(), id, actor(r))
 		if err != nil {
 			fail(w, r, err)
 			return

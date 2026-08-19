@@ -40,7 +40,7 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 			t.Fatalf("create %s: %v", input.ID, err)
 		}
-		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: input.ID}, "abc123", "code_changed", "tester"); err != nil {
+		if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: strings.Repeat("a", 40), Result: "code_changed"}, "tester"); err != nil {
 			t.Fatalf("confirm %s: %v", input.ID, err)
 		}
 	}
@@ -54,7 +54,11 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if item.ReconciliationState != domain.NeedsReconciliation {
+		expected := domain.Unimplemented
+		if id == "SWR-TEST-001" {
+			expected = domain.NeedsReconciliation
+		}
+		if item.ReconciliationState != expected {
 			t.Fatalf("%s state is %s", id, item.ReconciliationState)
 		}
 	}
@@ -81,11 +85,111 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.ReconciliationState != domain.NeedsReconciliation {
+	if item.ReconciliationState != domain.ReadyForReview {
 		t.Fatalf("state is %s", item.ReconciliationState)
 	}
-	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: "SWR-TEST-001"}, "def456", "code_changed", "tester"); err != nil {
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: "SWR-TEST-001"}, Commit: strings.Repeat("b", 40), Result: "code_changed"}, "tester"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRequirementImplementationRollsUpFromActiveLeaves(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	root := requirement("BR-ROLLUP-001", "business", 1)
+	if _, err := store.CreateRequirement(ctx, root, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: root.ID}, Commit: strings.Repeat("a", 40), Result: "existing_code_confirmed"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	child := requirement("STR-ROLLUP-001", "stakeholder", 1, "BR-ROLLUP-001@1")
+	if _, err := store.CreateRequirement(ctx, child, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	grandchild := requirement("SYR-ROLLUP-001", "system", 1, "STR-ROLLUP-001@1")
+	if _, err := store.CreateRequirement(ctx, grandchild, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := store.GetRequirement(ctx, domain.RequirementRef{ID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReconciliationState != domain.Unimplemented {
+		t.Fatalf("parent state is %s", stored.ReconciliationState)
+	}
+	assertReadyRequirements(t, store, grandchild.ID)
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: root.ID}, Commit: strings.Repeat("b", 40), Result: "existing_code_confirmed"}, "tester"); err == nil || !strings.Contains(err.Error(), "not a leaf") {
+		t.Fatalf("unexpected parent confirmation result: %v", err)
+	}
+	parentTask := domain.TaskInput{Schema: "task/v1", ID: "T-90", Title: "Implement parent", Description: "Implement the parent requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "BR-ROLLUP-001@1", Purpose: "implement"}}}
+	if _, err := store.CreateTask(ctx, parentTask, "tester"); err == nil || !strings.Contains(err.Error(), "not a leaf") {
+		t.Fatalf("unexpected parent task result: %v", err)
+	}
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: grandchild.ID}, Commit: strings.Repeat("b", 40), Result: "existing_code_confirmed"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = store.GetRequirement(ctx, domain.RequirementRef{ID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReconciliationState != domain.Implemented {
+		t.Fatalf("implemented child left parent %s", stored.ReconciliationState)
+	}
+	assertReadyRequirements(t, store)
+	implemented, err := store.ListRequirements(ctx, "", 20, "business", string(domain.Implemented))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(implemented.Items) != 1 || implemented.Items[0].ID != root.ID {
+		t.Fatalf("implemented roll-up filter returned %+v", implemented.Items)
+	}
+	if _, err := store.RetireRequirement(ctx, child.ID, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = store.GetRequirement(ctx, domain.RequirementRef{ID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReconciliationState != domain.Implemented {
+		t.Fatalf("retired child affected parent state: %s", stored.ReconciliationState)
+	}
+}
+
+func TestNewRefinementChildBlocksExistingParentTask(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	root := requirement("BR-TASK-ROLLUP-001", "business", 1)
+	if _, err := store.CreateRequirement(ctx, root, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	task := domain.TaskInput{Schema: "task/v1", ID: "T-91", Title: "Implement root", Description: "Implement the root requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "BR-TASK-ROLLUP-001@1", Purpose: "implement"}}}
+	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	child := requirement("STR-TASK-ROLLUP-001", "stakeholder", 1, "BR-TASK-ROLLUP-001@1")
+	if _, err := store.CreateRequirement(ctx, child, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := store.ListTasks(ctx, "", 20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ready.Items) != 0 {
+		t.Fatalf("parent task remained ready: %+v", ready.Items)
+	}
+	if _, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester"); err == nil || !strings.Contains(err.Error(), "not a leaf") {
+		t.Fatalf("unexpected lease result: %v", err)
 	}
 }
 
@@ -182,10 +286,10 @@ END;
 	}
 	defer database.Close()
 	var migrations int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003')`).Scan(&migrations); err != nil {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003', '202608190001')`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 4 {
+	if migrations != 5 {
 		t.Fatalf("database recorded %d expected migrations", migrations)
 	}
 	var dependencyTables int
@@ -292,7 +396,7 @@ func TestRequirementDependenciesBlockTaskUntilImplemented(t *testing.T) {
 	if _, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester"); err == nil || !strings.Contains(err.Error(), "requirement dependencies") {
 		t.Fatalf("unexpected lease error: %v", err)
 	}
-	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: prerequisite.ID}, "abc123", "code_changed", "tester"); err != nil {
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: prerequisite.ID}, Commit: strings.Repeat("a", 40), Result: "code_changed"}, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	ready, err = store.ListTasks(ctx, "", 20, true)
@@ -322,7 +426,7 @@ func TestRequirementRevisionInvalidatesDependencyConsumers(t *testing.T) {
 		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: input.ID}, "abc123", "code_changed", "tester"); err != nil {
+		if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: strings.Repeat("a", 40), Result: "code_changed"}, "tester"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -358,7 +462,7 @@ func TestTransitiveRequirementDependenciesBlockTask(t *testing.T) {
 		}
 	}
 	for _, id := range []string{middle.ID} {
-		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: id}, "abc123", "code_changed", "tester"); err != nil {
+		if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: id}, Commit: strings.Repeat("a", 40), Result: "code_changed"}, "tester"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -390,7 +494,7 @@ func TestRetireRequirementInvalidatesDownstreamAndBlocksTasks(t *testing.T) {
 		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: input.ID}, "abc123", "code_changed", "tester"); err != nil {
+		if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: strings.Repeat("a", 40), Result: "code_changed"}, "tester"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -428,7 +532,7 @@ func TestRetireRequirementInvalidatesDownstreamAndBlocksTasks(t *testing.T) {
 			t.Fatalf("leased blocked task %s", taskID)
 		}
 	}
-	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: base.ID}, "def456", "code_changed", "tester"); err == nil {
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: base.ID}, Commit: strings.Repeat("b", 40), Result: "code_changed"}, "tester"); err == nil {
 		t.Fatal("confirmed a retired requirement")
 	}
 }
@@ -464,9 +568,9 @@ func TestReadyRequirementsFollowDependenciesAndTasks(t *testing.T) {
 	if _, err := store.CompleteTask(ctx, task.ID, lease.LeaseID, lease.Fence, "abc123", "tester"); err != nil {
 		t.Fatal(err)
 	}
-	assertReadyRequirements(t, store, "SWR-BASE-001")
+	assertReadyRequirements(t, store)
 
-	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: base.ID}, "abc123", "code_changed", "tester"); err != nil {
+	if _, err := store.ConfirmRequirement(ctx, domain.ConfirmationInput{Requirement: domain.RequirementRef{ID: base.ID}, Commit: strings.Repeat("a", 40), Result: "code_changed"}, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	assertReadyRequirements(t, store, "SWR-DEPENDENT-001")

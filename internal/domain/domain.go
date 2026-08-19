@@ -11,6 +11,15 @@ import (
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
 
+var fullCommitPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+
+func ValidateCommit(value string) error {
+	if !fullCommitPattern.MatchString(value) {
+		return errors.New("commit must be a full 40-character hexadecimal SHA")
+	}
+	return nil
+}
+
 type ReconciliationState string
 
 type LifecycleState string
@@ -18,6 +27,7 @@ type LifecycleState string
 const (
 	Unimplemented       ReconciliationState = "unimplemented"
 	InProgress          ReconciliationState = "in_progress"
+	ReadyForReview      ReconciliationState = "ready_for_review"
 	Implemented         ReconciliationState = "implemented"
 	NeedsReconciliation ReconciliationState = "needs_reconciliation"
 )
@@ -58,11 +68,16 @@ type RequirementInput struct {
 }
 
 type Requirement struct {
-	ID                  string              `json:"id"`
-	CurrentRevision     int                 `json:"current_revision"`
-	LifecycleState      LifecycleState      `json:"lifecycle_state"`
-	ReconciliationState ReconciliationState `json:"reconciliation_state"`
-	Revision            RequirementRevision `json:"revision"`
+	ID                  string                `json:"id"`
+	CurrentRevision     int                   `json:"current_revision"`
+	LifecycleState      LifecycleState        `json:"lifecycle_state"`
+	ReconciliationState ReconciliationState   `json:"reconciliation_state"`
+	Revision            RequirementRevision   `json:"revision"`
+	RevisionHistory     []RequirementRevision `json:"revision_history,omitempty"`
+	StateHistory        []StateChange         `json:"state_history,omitempty"`
+	Confirmations       []Confirmation        `json:"confirmations,omitempty"`
+	OpenCauses          []ReconciliationCause `json:"open_causes,omitempty"`
+	Readiness           *Readiness            `json:"readiness,omitempty"`
 }
 
 type RequirementRevision struct {
@@ -178,6 +193,45 @@ type Task struct {
 	CompletedCommit string                 `json:"completed_commit,omitempty"`
 	Requirements    []TaskRequirementInput `json:"requirements"`
 	DependsOn       []string               `json:"depends_on"`
+	PullRequests    []PullRequest          `json:"pull_requests,omitempty"`
+	StateHistory    []StateChange          `json:"state_history,omitempty"`
+	Readiness       *Readiness             `json:"readiness,omitempty"`
+}
+
+type Readiness struct {
+	Ready    bool     `json:"ready"`
+	Blockers []string `json:"blockers"`
+}
+
+type StateChange struct {
+	Sequence   int64     `json:"sequence"`
+	Field      string    `json:"field"`
+	From       string    `json:"from,omitempty"`
+	To         string    `json:"to"`
+	OccurredAt time.Time `json:"occurred_at"`
+	ActorID    string    `json:"actor_id"`
+}
+
+type Confirmation struct {
+	Result      string       `json:"result"`
+	Commit      string       `json:"commit"`
+	TaskID      string       `json:"task_id,omitempty"`
+	PullRequest *PullRequest `json:"pull_request,omitempty"`
+	ConfirmedAt time.Time    `json:"confirmed_at"`
+	ActorID     string       `json:"actor_id"`
+}
+
+type ReconciliationCause struct {
+	Requirement RequirementRef `json:"requirement"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
+type ConfirmationInput struct {
+	Requirement RequirementRef
+	Commit      string
+	Result      string
+	TaskID      string
+	PullRequest *PullRequest
 }
 
 type Lease struct {

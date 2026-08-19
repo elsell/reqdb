@@ -8,6 +8,31 @@
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.4 1.7h6.6v7.3h-13z"/></symbol>
+    <symbol id="i-requirement" viewBox="0 0 16 16"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5 7h6M5 9.5h6M5 12h4"/></symbol>
+    <symbol id="i-business" viewBox="0 0 16 16"><path d="M2 14.5h12M3.5 14V6.5h9V14M5.5 6V3h5v3M6 9h1M9 9h1M6 11.5h1M9 11.5h1"/></symbol>
+    <symbol id="i-stakeholder" viewBox="0 0 16 16"><circle cx="8" cy="4.5" r="2.5"/><path d="M3.5 14c.2-3 1.7-5 4.5-5s4.3 2 4.5 5"/></symbol>
+    <symbol id="i-system" viewBox="0 0 16 16"><rect x="1.5" y="2" width="5" height="4"/><rect x="9.5" y="2" width="5" height="4"/><rect x="5.5" y="10" width="5" height="4"/><path d="M4 6v2h8V6M8 8v2"/></symbol>
+    <symbol id="i-software" viewBox="0 0 16 16"><path d="m5.5 3.5-4 4.5 4 4.5M10.5 3.5l4 4.5-4 4.5M9 2 7 14"/></symbol>
+    <symbol id="i-task" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12"/><path d="m4.5 5 1.2 1.2L8 4M9.5 5h2M4.5 9l1.2 1.2L8 8M9.5 9h2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="m4.5 8 2.3 2.4 4.8-5"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 16 16"><path d="M8 1.5 15 14H1z"/><path d="M8 5v4.5M8 12v.1"/></symbol>
+    <symbol id="i-progress" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4v4l3 2"/></symbol>
+    <symbol id="i-pending" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><circle class="fill" cx="8" cy="8" r="2"/></symbol>
+    <symbol id="i-retired" viewBox="0 0 16 16"><path d="M2 4h12v10H2zM1.5 2h13v3h-13zM6 8h4M3 13 13 3"/></symbol>
+    <symbol id="i-lease" viewBox="0 0 16 16"><circle cx="5" cy="6" r="3.5"/><path d="m7.5 8.5 6 6M10 11l1.5-1.5M12 13l1.5-1.5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="6.5" cy="6.5" r="4.5"/><path d="m10 10 4 4"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4M6 2 2 6M10 2l4 4M14 10l-4 4M2 10l4 4"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 16 16"><path d="M6 2v4H2M10 2v4h4M10 14v-4h4M6 14v-4H2M2 6l4-4M14 6l-4-4M14 10l-4 4M2 10l4 4"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 5.5A6 6 0 1 0 14 9M13.5 2v3.5H10"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><circle class="fill" cx="3" cy="8" r="1"/><circle class="fill" cx="8" cy="8" r="1"/><circle class="fill" cx="13" cy="8" r="1"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="9" height="9"/><path d="M11 5V2H2v9h3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><path d="m6.5 10.5-1 1a3 3 0 0 1-4.2-4.2l2-2a3 3 0 0 1 4.2 0M9.5 5.5l1-1a3 3 0 0 1 4.2 4.2l-2 2a3 3 0 0 1-4.2 0M5.5 10.5l5-5"/></symbol>
+    <symbol id="i-review" viewBox="0 0 16 16"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8z"/><circle cx="8" cy="8" r="2"/></symbol>
+    <symbol id="i-ready" viewBox="0 0 16 16"><path d="m8 1.5 2 4.5 4.5 2-4.5 2-2 4.5L6 10 1.5 8 6 6z"/><path d="m5.5 8 1.5 1.5 3.5-3.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 7v4M8 4.5v.1"/></symbol>
+  </svg>
   <header class="topbar">
     <h1>reqdb</h1>
     <span class="workspace-title">Requirements database</span>
@@ -20,28 +45,30 @@
   <main class="workspace">
     <section class="toolbar" aria-label="Tree controls">
       <label class="search">
-        <span>Filter:</span>
+        <svg class="ui-icon" aria-hidden="true"><use href="#i-search"></use></svg><span>Filter:</span>
         <input id="filter" type="search" placeholder="ID, title, state, or text" autocomplete="off">
       </label>
-      <button id="expand-all" type="button">Expand all</button>
-      <button id="collapse-all" type="button">Collapse all</button>
-      <button id="refresh" type="button">Refresh</button>
+      <button id="expand-all" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#i-expand"></use></svg>Expand all</button>
+      <button id="collapse-all" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#i-collapse"></use></svg>Collapse all</button>
+      <button id="refresh" type="button"><svg class="ui-icon" aria-hidden="true"><use href="#i-refresh"></use></svg>Refresh</button>
       <span id="updated" class="updated">Not loaded</span>
     </section>
 
     <div id="error" class="error" role="alert" hidden></div>
     <div class="content">
       <section class="explorer-panel" aria-label="Requirements and tasks">
-        <div class="pane-heading">Requirement and Task Explorer</div>
+        <div class="pane-heading"><svg class="ui-icon" aria-hidden="true"><use href="#i-folder"></use></svg>Requirement and Task Explorer</div>
         <div id="explorer" class="tree loading">Loading…</div>
       </section>
+      <div id="vertical-splitter" class="splitter vertical" role="separator" aria-label="Resize explorer and details" aria-orientation="vertical" tabindex="0"></div>
       <section class="detail-panel" aria-label="Selected item details">
-        <div class="pane-heading">Details</div>
+        <div class="pane-heading"><svg class="ui-icon" aria-hidden="true"><use href="#i-requirement"></use></svg>Details</div>
         <div id="details" class="details empty">Select a requirement or task.</div>
       </section>
     </div>
-    <section class="lease-panel" aria-label="Current leases">
-      <div class="pane-heading">Current Leases <span id="lease-count" class="pane-count">0</span></div>
+    <div id="horizontal-splitter" class="splitter horizontal" role="separator" aria-label="Resize current leases" aria-orientation="horizontal" tabindex="0"></div>
+    <section id="lease-panel" class="lease-panel" aria-label="Current leases">
+      <div class="pane-heading"><svg class="ui-icon" aria-hidden="true"><use href="#i-lease"></use></svg>Current Leases <span id="lease-count" class="pane-count">0</span></div>
       <div id="leases" class="lease-list loading">Loading…</div>
     </section>
     <section id="summary" class="summary" aria-label="Summary"></section>

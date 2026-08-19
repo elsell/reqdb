@@ -33,7 +33,7 @@ type Store interface {
 	GetRequirement(context.Context, domain.RequirementRef) (domain.Requirement, error)
 	ListRequirements(context.Context, string, int, string, string) (domain.Page[domain.Requirement], error)
 	ListReadyRequirements(context.Context, string, int) (domain.Page[domain.Requirement], error)
-	ConfirmRequirement(context.Context, domain.RequirementRef, string, string, string) (domain.Requirement, error)
+	ConfirmRequirement(context.Context, domain.ConfirmationInput, string) (domain.Requirement, error)
 	RetireRequirement(context.Context, string, string) (domain.Requirement, error)
 	Trace(context.Context, string) ([]domain.Requirement, error)
 	Impact(context.Context, string) ([]domain.Requirement, error)
@@ -46,6 +46,9 @@ type Store interface {
 	Heartbeat(context.Context, string, int, time.Duration, string) (domain.Lease, error)
 	Release(context.Context, string, int, string) error
 	CompleteTask(context.Context, string, string, int, string, string) (domain.Task, error)
+	CloseTask(context.Context, string, string) (domain.Task, error)
+	ExpireLeases(context.Context, string) error
+	NextLeaseExpiry(context.Context) (time.Time, bool, error)
 	LinkPullRequest(context.Context, string, domain.PullRequest, string) error
 	ListAudit(context.Context, string, string, int) (domain.Page[domain.AuditEvent], error)
 	PruneAudit(context.Context, time.Time) error

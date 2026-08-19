@@ -38,6 +38,18 @@ Each non-business requirement shall refine one or more requirements at the
 immediate parent level. Each link shall name a parent revision. The refinement
 graph shall be acyclic.
 
+An active requirement with no active current refinement children shall be a
+leaf. Only a leaf can have implementation work or an implementation
+confirmation. A leaf shall use its stored reconciliation state.
+
+An active non-leaf requirement shall derive its reconciliation state from its
+active current refinement children. It shall be `implemented` only when every
+active child is recursively `implemented`. Otherwise, it shall be
+`unimplemented`. A retired child shall not affect this roll-up.
+
+Roll-up shall be calculated when reqdb reads or evaluates a requirement. Reqdb
+shall not store roll-up changes as reconciliation state history.
+
 A requirement can depend on other requirement revisions. `refines` shall
 describe the requirement hierarchy. `depends_on` shall describe implementation
 order. These links shall be separate. The dependency graph shall be acyclic.
@@ -50,6 +62,10 @@ statement shall contain one lowercase `shall`.
 A requirement shall have a stable ID and immutable revisions. A content change
 shall create the next revision. The database shall identify one current
 revision.
+
+`requirement get` shall show all revisions in revision order. It shall also
+show lifecycle and reconciliation state history in event order. List commands
+shall return only the current summary.
 
 `apply` shall use the expected current revision. A mismatch shall cause no
 change.
@@ -81,22 +97,35 @@ Refinement parents shall not affect readiness.
 
 ## Reconciliation
 
-Reconciliation describes the relation between a requirement revision and the
-code.
+Reconciliation describes the relation between a requirement hierarchy and the
+code. Reqdb shall expose one reconciliation state for each requirement. A leaf
+shall use direct reconciliation. A non-leaf shall use refinement roll-up.
 
 | State | Meaning |
 |---|---|
-| `unimplemented` | No accepted implementation exists. |
+| `unimplemented` | A leaf has no accepted implementation, or a non-leaf has an unimplemented active child. |
 | `in_progress` | An active task implements or reconciles the requirement. |
-| `implemented` | A confirmation states that the code matches the requirement revision. |
+| `ready_for_review` | A task completed and the requirement needs confirmation. |
+| `implemented` | A leaf has a confirmation, or every active child of a non-leaf is recursively implemented. |
 | `needs_reconciliation` | An upstream requirement changed after confirmation. |
 
 A confirmation shall name the requirement revision, Git commit, actor, time,
 and result. The result shall state that code changed or that existing code was
 confirmed.
 
+The server shall reject a confirmation for a requirement that has an active
+current refinement child.
+
 Task completion shall not confirm implementation by itself. A confirmation
 may refer to the task and pull request that produced the result.
+
+A completed task shall set each linked current leaf requirement to
+`ready_for_review`. A requirement in this state shall not be ready for another
+task. Confirmation shall set it to `implemented`.
+
+`requirement get` shall show its readiness result and all blockers. Readiness
+diagnostics shall include state, active tasks, stale dependencies, retired
+dependencies, and dependencies that are not implemented.
 
 When a requirement gets a new revision, the server shall:
 
@@ -108,14 +137,22 @@ When a requirement gets a new revision, the server shall:
    requirement.
 
 An active implementation or reconciliation task may set an unimplemented or
-affected requirement to `in_progress`. A confirmation shall resolve the known
-causes for that requirement revision and set it to `implemented`.
+affected leaf requirement to `in_progress`. A confirmation shall resolve the
+known causes for that leaf revision and set it to `implemented`.
 
 ## Tasks and leases
 
 A task shall have a title, description, priority, state, requirement links,
 and task dependencies. A requirement link shall have the purpose `implement`
 or `reconcile`.
+
+An implementation or reconciliation task shall link only to leaf requirement
+revisions.
+
+A task shall be `open`, `complete`, or `closed`. Closing shall stop an open,
+unleased task without completing it. A closed task shall not satisfy task
+dependencies and shall not prevent creation of replacement work for a linked
+requirement.
 
 A task is ready when all these conditions are true:
 
@@ -132,12 +169,27 @@ A claim shall create one lease in one transaction. A lease shall identify the
 task, agent, fence, claim time, and expiry time. Claim, heartbeat, release, and
 completion operations shall use the current lease and fence.
 
+The server shall schedule the next lease expiry and process it promptly after
+its expiry time. Lease changes shall reschedule this work. Expiry shall remove
+the active lease and recalculate each linked requirement state. It shall record
+the lease expiry and all resulting state changes.
+
 The server shall list active leases in ascending lease ID order. The list shall
 support cursor pagination and optional agent and task filters. Expired leases
 shall not appear. Their history shall remain available in the audit log.
 
-A completed task shall record its Git commit. A task can link to zero or more
-pull requests. A pull request can link to more than one task.
+A completed task shall record its full 40-character hexadecimal Git commit.
+A task can link to zero or more pull requests. A pull request can link to more
+than one task. Task detail output shall show all pull request links.
+
+`task get` shall show its state history, readiness result, and all blockers.
+
+A requirement confirmation shall accept an optional task and pull request. If
+a task is supplied, it shall be complete and its commit shall equal the
+confirmation commit. If both a task and pull request are supplied, the pull
+request shall be linked to the task. Reqdb shall store the commit and pull
+request as separate references. It shall not claim that a mutable pull request
+still points to the recorded commit.
 
 ## Audit
 
@@ -189,6 +241,7 @@ The core resource commands are:
 | `task ready` | List ready tasks. |
 | `task lease ID --agent ID` | Lease one task. |
 | `task complete ID --lease ID --fence N --commit SHA` | Complete one task. |
+| `task close ID` | Close an open, unleased task. |
 | `task link-pr ID --url URL` | Link a task to a pull request. |
 | `lease list [--agent ID] [--task ID]` | List active leases. |
 | `lease heartbeat ID --fence N` | Extend one lease. |

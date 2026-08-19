@@ -128,7 +128,8 @@ func serve(args []string) error {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	broker := observability.NewBroker()
 	events := observability.Fanout{observability.LogSink{Logger: logger}, observability.OTelSink{}, broker}
-	service := application.Service{Store: store, Auth: application.AllowAll{}, Events: events}
+	leaseWake := make(chan struct{}, 1)
+	service := application.Service{Store: store, Auth: application.AllowAll{}, Events: events, LeaseWake: leaseWake}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", httpapi.API{Service: service, Events: broker}.Handler())
 	mux.Handle("/", webui.Handler())
@@ -152,6 +153,44 @@ func serve(args []string) error {
 			case <-ticker.C:
 				prune()
 			case <-stop:
+				return
+			}
+		}
+	}()
+	go func() {
+		for {
+			expiry, exists, err := store.NextLeaseExpiry(context.Background())
+			if err != nil {
+				logger.Error("read next lease expiry failed", "error", err)
+			}
+			var timer *time.Timer
+			var timerChannel <-chan time.Time
+			if err == nil && exists {
+				delay := time.Until(expiry)
+				if delay < 0 {
+					delay = 0
+				}
+				timer = time.NewTimer(delay)
+				timerChannel = timer.C
+			}
+			select {
+			case <-timerChannel:
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := service.ExpireLeases(ctx); err != nil {
+					logger.Error("lease expiry failed", "error", err)
+				}
+				cancel()
+			case <-leaseWake:
+				if timer != nil && !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			case <-stop:
+				if timer != nil {
+					timer.Stop()
+				}
 				return
 			}
 		}
@@ -231,7 +270,14 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 		if option(args, "--commit") == "" {
 			return withHelp("--commit is required", actionHelp["requirement confirm"])
 		}
-		body := map[string]any{"commit": option(args, "--commit"), "result": option(args, "--result")}
+		body := map[string]any{"commit": option(args, "--commit"), "result": option(args, "--result"), "task_id": option(args, "--task")}
+		if raw := option(args, "--pr"); raw != "" {
+			pr, err := httpapi.ParsePullRequest(raw)
+			if err != nil {
+				return err
+			}
+			body["pull_request"] = pr
+		}
 		return call(ctx, api, http.MethodPost, "/v1/requirements/"+url.PathEscape(args[1])+"/confirm", body, jsonOutput)
 	case "retire":
 		if len(args) < 2 {
@@ -297,6 +343,11 @@ func task(ctx context.Context, api client.Client, args []string, jsonOutput bool
 			return withHelp(err.Error(), actionHelp["task complete"])
 		}
 		return call(ctx, api, http.MethodPost, "/v1/tasks/"+url.PathEscape(args[1])+"/complete", map[string]any{"lease": option(args, "--lease"), "fence": fence, "commit": option(args, "--commit")}, jsonOutput)
+	case "close":
+		if len(args) < 2 {
+			return withHelp("a task ID is required", actionHelp["task close"])
+		}
+		return call(ctx, api, http.MethodPost, "/v1/tasks/"+url.PathEscape(args[1])+"/close", nil, jsonOutput)
 	case "link-pr":
 		if len(args) < 2 {
 			return withHelp("a task ID is required", actionHelp["task link-pr"])

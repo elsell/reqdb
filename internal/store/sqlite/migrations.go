@@ -11,6 +11,7 @@ import (
 const requestIDsMigrationID = "202608180001"
 const requirementDependencyMigrationID = "202608180002"
 const requirementLifecycleMigrationID = "202608180003"
+const workflowStateMigrationID = "202608190001"
 
 type migrationRecord struct {
 	ID string `gorm:"column:id;primaryKey;size:255"`
@@ -21,6 +22,15 @@ func (migrationRecord) TableName() string { return "schema_migrations" }
 func migrate(database *gorm.DB) error {
 	if err := baselineLegacyDatabase(database); err != nil {
 		return err
+	}
+	if err := database.Exec(`PRAGMA foreign_keys = OFF`).Error; err != nil {
+		return fmt.Errorf("disable foreign keys for database migrations: %w", err)
+	}
+	restoreForeignKeys := func() error {
+		if err := database.Exec(`PRAGMA foreign_keys = ON`).Error; err != nil {
+			return fmt.Errorf("enable foreign keys after database migrations: %w", err)
+		}
+		return nil
 	}
 	options := &gormigrate.Options{
 		TableName:                 "schema_migrations",
@@ -34,7 +44,24 @@ func migrate(database *gorm.DB) error {
 		return tx.Exec(dbschema.Schema).Error
 	})
 	if err := migrator.Migrate(); err != nil {
+		_ = restoreForeignKeys()
 		return fmt.Errorf("apply database migrations: %w", err)
+	}
+	if err := restoreForeignKeys(); err != nil {
+		return err
+	}
+	type foreignKeyViolation struct {
+		Table        string
+		RowID        int64 `gorm:"column:rowid"`
+		Parent       string
+		ForeignKeyID int `gorm:"column:fkid"`
+	}
+	var violations []foreignKeyViolation
+	if err := database.Raw(`PRAGMA foreign_key_check`).Scan(&violations).Error; err != nil {
+		return fmt.Errorf("check foreign keys after database migrations: %w", err)
+	}
+	if len(violations) != 0 {
+		return fmt.Errorf("database migration left %d foreign key violation(s)", len(violations))
 	}
 	return nil
 }
@@ -85,6 +112,12 @@ END`).Error
 				return tx.Migrator().DropColumn("requirement", "lifecycle_state")
 			},
 		},
+		{
+			ID: workflowStateMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(dbschema.WorkflowStateMigration).Error
+			},
+		},
 	}
 }
 
@@ -114,6 +147,11 @@ func baselineLegacyDatabase(database *gorm.DB) error {
 	if database.Migrator().HasColumn("requirement", "lifecycle_state") {
 		if err := database.Create(&migrationRecord{ID: requirementLifecycleMigrationID}).Error; err != nil {
 			return fmt.Errorf("record requirement lifecycle migration baseline: %w", err)
+		}
+	}
+	if database.Migrator().HasTable("state_history") {
+		if err := database.Create(&migrationRecord{ID: workflowStateMigrationID}).Error; err != nil {
+			return fmt.Errorf("record workflow state migration baseline: %w", err)
 		}
 	}
 	return nil

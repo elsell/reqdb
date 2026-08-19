@@ -93,6 +93,36 @@ func printRequirement(data json.RawMessage) error {
 		return err
 	}
 	fmt.Printf("\nStatement:\n  %s\n", item.Revision.Statement)
+	printReadiness(item.Readiness)
+	if len(item.OpenCauses) > 0 {
+		fmt.Println("\nOpen reconciliation causes:")
+		for _, cause := range item.OpenCauses {
+			fmt.Printf("  %s@%d  %s\n", cause.Requirement.ID, cause.Requirement.Revision, displayTime(cause.CreatedAt))
+		}
+	}
+	if len(item.RevisionHistory) > 0 {
+		fmt.Println("\nRevision history:")
+		table := newTable()
+		fmt.Fprintln(table, "REVISION\tCREATED\tACTOR\tTITLE")
+		for _, revision := range item.RevisionHistory {
+			fmt.Fprintf(table, "%d\t%s\t%s\t%s\n", revision.Revision, displayTime(revision.CreatedAt), revision.ActorID, revision.Title)
+		}
+		_ = table.Flush()
+	}
+	printStateHistory(item.StateHistory)
+	if len(item.Confirmations) > 0 {
+		fmt.Println("\nConfirmation history:")
+		table := newTable()
+		fmt.Fprintln(table, "TIME\tRESULT\tCOMMIT\tTASK\tPULL REQUEST\tACTOR")
+		for _, confirmation := range item.Confirmations {
+			pr := ""
+			if confirmation.PullRequest != nil {
+				pr = confirmation.PullRequest.URL
+			}
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", displayTime(confirmation.ConfirmedAt), confirmation.Result, confirmation.Commit, confirmation.TaskID, pr, confirmation.ActorID)
+		}
+		_ = table.Flush()
+	}
 	return nil
 }
 
@@ -145,8 +175,9 @@ func printRequirementTree(data json.RawMessage) error {
 	less(roots)
 	table := newTable()
 	fmt.Fprintln(table, "REQUIREMENT\tLEVEL\tSTATE\tTITLE")
+	expanded := map[string]bool{}
 	for _, root := range roots {
-		printTreeNode(table, root, "", true, true, children, tasks, map[string]bool{})
+		printTreeNode(table, root, "", true, true, children, tasks, map[string]bool{}, expanded)
 	}
 	if err := table.Flush(); err != nil {
 		return err
@@ -169,7 +200,7 @@ func printRequirementTree(data json.RawMessage) error {
 	return nil
 }
 
-func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, tasks map[string][]domain.Task, path map[string]bool) {
+func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, tasks map[string][]domain.Task, path, expanded map[string]bool) {
 	branch := ""
 	if root {
 		branch = "● "
@@ -184,10 +215,15 @@ func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix str
 	if item.LifecycleState == domain.Retired {
 		state = string(domain.Retired)
 	}
-	fmt.Fprintf(writer, "%s%s%s@%d\t%s\t%s\t%s\n", prefix, branch, item.ID, item.Revision.Revision, item.Revision.Level, state, item.Revision.Title)
-	if path[item.ID] {
+	title := item.Revision.Title
+	if expanded[item.ID] {
+		title += " (reference; expanded above)"
+	}
+	fmt.Fprintf(writer, "%s%s%s@%d\t%s\t%s\t%s\n", prefix, branch, item.ID, item.Revision.Revision, item.Revision.Level, state, title)
+	if path[item.ID] || expanded[item.ID] {
 		return
 	}
+	expanded[item.ID] = true
 	nextPath := make(map[string]bool, len(path)+1)
 	for id, value := range path {
 		nextPath[id] = value
@@ -205,7 +241,7 @@ func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix str
 	taskChildren := tasks[fmt.Sprintf("%s@%d", item.ID, item.Revision.Revision)]
 	for index, child := range requirementChildren {
 		isLast := index == len(requirementChildren)-1 && len(taskChildren) == 0
-		printTreeNode(writer, child, nextPrefix, isLast, false, children, tasks, nextPath)
+		printTreeNode(writer, child, nextPrefix, isLast, false, children, tasks, nextPath, expanded)
 	}
 	for index, task := range taskChildren {
 		branch := "├── "
@@ -241,9 +277,9 @@ func printTaskList(data json.RawMessage) error {
 		return nil
 	}
 	table := newTable()
-	fmt.Fprintln(table, "ID\tSTATE\tPRIORITY\tREQUIREMENTS\tTITLE")
+	fmt.Fprintln(table, "ID\tSTATE\tPRIORITY\tREQUIREMENTS\tPRS\tTITLE")
 	for _, item := range items {
-		fmt.Fprintf(table, "%s\t%s\t%d\t%d\t%s\n", item.ID, item.State, item.Priority, len(item.Requirements), item.Title)
+		fmt.Fprintf(table, "%s\t%s\t%d\t%d\t%d\t%s\n", item.ID, item.State, item.Priority, len(item.Requirements), len(item.PullRequests), item.Title)
 	}
 	return table.Flush()
 }
@@ -273,7 +309,42 @@ func printTask(data json.RawMessage) error {
 			fmt.Printf("  %s  (%s)\n", link.Requirement, link.Purpose)
 		}
 	}
+	if len(item.PullRequests) > 0 {
+		fmt.Println("\nPull requests:")
+		for _, pr := range item.PullRequests {
+			fmt.Printf("  %s\n", pr.URL)
+		}
+	}
+	printReadiness(item.Readiness)
+	printStateHistory(item.StateHistory)
 	return nil
+}
+
+func printReadiness(readiness *domain.Readiness) {
+	if readiness == nil {
+		return
+	}
+	value := "ready"
+	if !readiness.Ready {
+		value = "blocked"
+	}
+	fmt.Printf("\nReadiness: %s\n", value)
+	for _, blocker := range readiness.Blockers {
+		fmt.Printf("  - %s\n", blocker)
+	}
+}
+
+func printStateHistory(items []domain.StateChange) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Println("\nState history:")
+	table := newTable()
+	fmt.Fprintln(table, "TIME\tFIELD\tFROM\tTO\tACTOR")
+	for _, item := range items {
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", displayTime(item.OccurredAt), item.Field, item.From, item.To, item.ActorID)
+	}
+	_ = table.Flush()
 }
 
 func printLease(data json.RawMessage) error {

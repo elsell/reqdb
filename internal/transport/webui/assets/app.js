@@ -2,9 +2,11 @@
 
 const state = {
   requirements: [], tasks: [], leases: [], filter: "", refreshTimer: 0, selected: null,
-  collapsed: new Set(), collapsedGroups: new Set(),
+  collapsed: new Set(), collapsedGroups: new Set(), details: new Map(),
 };
 const elements = {
+  content: document.querySelector(".content"), leasePanel: document.querySelector("#lease-panel"),
+  verticalSplitter: document.querySelector("#vertical-splitter"), horizontalSplitter: document.querySelector("#horizontal-splitter"),
   explorer: document.querySelector("#explorer"), details: document.querySelector("#details"), leases: document.querySelector("#leases"),
   leaseCount: document.querySelector("#lease-count"), summary: document.querySelector("#summary"),
   error: document.querySelector("#error"), updated: document.querySelector("#updated"),
@@ -21,6 +23,68 @@ function element(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+function icon(name, className = "ui-icon") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+function headerCell(label, definition) {
+  const cell = element("div", "tree-header-cell");
+  if (label) cell.append(element("span", "", label));
+  if (!definition) return cell;
+  const help = element("span", "column-help");
+  help.setAttribute("tabindex", "0");
+  help.setAttribute("aria-label", `${label}: ${definition}`);
+  help.append(icon("info", "column-help-icon"));
+  const tooltip = element("span", "column-tooltip", definition);
+  tooltip.setAttribute("role", "tooltip");
+  help.append(tooltip);
+  const positionTooltip = () => {
+    const triggerBounds = help.getBoundingClientRect();
+    const explorerBounds = elements.explorer.getBoundingClientRect();
+    const width = Math.min(230, explorerBounds.width - 12);
+    const left = Math.max(explorerBounds.left + 6, Math.min(triggerBounds.right - width, explorerBounds.right - width - 6));
+    tooltip.style.width = `${width}px`;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${triggerBounds.bottom + 3}px`;
+  };
+  help.addEventListener("mouseenter", positionTooltip);
+  help.addEventListener("focus", positionTooltip);
+  cell.append(help);
+  return cell;
+}
+
+function statusIcon(value) {
+  if (value === "implemented" || value === "complete") return "check";
+  if (value === "needs_reconciliation" || value === "blocked") return "warning";
+  if (value === "ready_for_review") return "review";
+  if (value === "ready") return "ready";
+  if (value === "in_progress") return "progress";
+  if (value === "retired" || value === "closed") return "retired";
+  return "pending";
+}
+
+function statusChip(value, label) {
+  const chip = element("span", `status-chip ${value}`);
+  chip.append(icon(statusIcon(value), "status-icon"), element("span", "", label || value.replaceAll("_", " ")));
+  return chip;
+}
+
+function actionIcon(label) {
+  if (label.startsWith("Copy")) return "copy";
+  if (label.startsWith("Confirm") || label.startsWith("Complete")) return "check";
+  if (label.startsWith("Retire") || label.startsWith("Release")) return "retired";
+  if (label.startsWith("Lease")) return "lease";
+  if (label.startsWith("Link")) return "link";
+  if (label.startsWith("Heartbeat")) return "refresh";
+  return "more";
 }
 
 async function fetchPage(path) {
@@ -45,14 +109,28 @@ async function refresh() {
   elements.refresh.disabled = true;
   try {
     [state.requirements, state.tasks, state.leases] = await Promise.all([fetchAll("/v1/requirements"), fetchAll("/v1/tasks"), fetchAll("/v1/leases")]);
+    state.details.clear();
     elements.error.hidden = true;
     render();
+    if (state.selected) await loadDetail(state.selected.type, state.selected.id);
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (error) {
     elements.error.textContent = error.message;
     elements.error.hidden = false;
   } finally {
     elements.refresh.disabled = false;
+  }
+}
+
+async function loadDetail(type, id) {
+  try {
+    const resource = type === "requirement" ? "requirements" : "tasks";
+    const envelope = await fetchPage(`/v1/${resource}/${encodeURIComponent(id)}`);
+    state.details.set(`${type}:${id}`, envelope.data);
+    renderDetails();
+  } catch (error) {
+    elements.error.textContent = error.message;
+    elements.error.hidden = false;
   }
 }
 
@@ -83,7 +161,8 @@ function copy(value) {
 
 function actionsMenu(actions) {
   const menu = element("span", "actions");
-  const toggle = element("button", "actions-toggle", "Actions ▾");
+  const toggle = element("button", "actions-toggle");
+  toggle.append(icon("more"), "Actions");
   toggle.type = "button";
   toggle.title = "Item actions";
   toggle.addEventListener("click", event => {
@@ -103,7 +182,8 @@ function showActions(anchor, actions) {
   closeActions();
   const list = element("div", "actions-menu");
   for (const action of actions) {
-    const control = element("button", "action-item", action.label);
+    const control = element("button", "action-item");
+    control.append(icon(actionIcon(action.label)), element("span", "", action.label));
     control.type = "button";
     control.addEventListener("click", event => { event.stopPropagation(); closeActions(); action.run(); });
     list.append(control);
@@ -141,17 +221,33 @@ function button(hasChildren, collapsed, toggle) {
   return control;
 }
 
-function nodeRow({ id, title, text, meta, lifecycleValue, stateValue, stateLabel, type, hasChildren, collapsed, toggle, group, actions, selected, select }) {
+function nodeRow({ id, title, lifecycleValue, leaseLabel, ready, stateValue, stateLabel, type, iconName, depth = 0, hasChildren, collapsed, toggle, group, actions, selected, select }) {
   const row = element("div", `tree-row${group ? " group" : ""}${selected ? " selected" : ""}`);
-  row.title = [id, title, text, meta, stateValue].filter(Boolean).join(" — ");
-  row.append(button(hasChildren, collapsed, toggle), element("span", `icon ${group ? "folder" : type}`));
-  if (id) row.append(element("span", "node-id", id));
-  row.append(element("span", "node-title", title));
-  if (text) row.append(element("span", "node-text", `— ${text}`));
-  if (meta) row.append(element("span", "node-meta", meta));
-  if (lifecycleValue === "retired") row.append(element("span", "node-lifecycle retired", "retired"));
-  if (stateValue) row.append(element("span", `node-state ${stateValue}`, stateLabel || stateValue.replaceAll("_", " ")));
-  if (actions?.length) row.append(actionsMenu(actions));
+  row.setAttribute("role", "treeitem");
+  if (hasChildren) row.setAttribute("aria-expanded", String(!collapsed));
+  if (select) row.setAttribute("aria-selected", String(Boolean(selected)));
+  row.title = [id, title, lifecycleValue, stateValue, ready ? "ready" : ""].filter(Boolean).join(" — ");
+
+  const primary = element("div", "tree-primary");
+  primary.style.setProperty("--depth", String(depth));
+  primary.append(button(hasChildren, collapsed, toggle), icon(group ? "folder" : (iconName || type), `item-icon ${group ? "folder" : (iconName || type)}`));
+  if (id) primary.append(element("span", "node-id", id));
+  primary.append(element("span", "node-title", title));
+
+  const lifecycle = element("div", `tree-attribute${lifecycleValue ? "" : " muted"}`);
+  if (lifecycleValue) lifecycle.append(statusChip(lifecycleValue)); else lifecycle.textContent = "—";
+  const workState = element("div", `tree-attribute${stateValue ? "" : " muted"}`);
+  if (stateValue) workState.append(statusChip(stateValue, stateLabel)); else workState.textContent = "—";
+  if (leaseLabel) {
+    workState.append(icon("lease", "status-icon lease-mark"));
+    workState.title = leaseLabel;
+  }
+  const readiness = element("div", `tree-attribute${group ? " muted" : ""}`);
+  if (group) readiness.textContent = "—";
+  else readiness.append(ready ? statusChip("ready", "Yes") : statusChip("open", "No"));
+  const actionCell = element("div", "tree-attribute tree-action");
+  if (actions?.length) actionCell.append(actionsMenu(actions));
+  row.append(primary, lifecycle, workState, readiness, actionCell);
   if (select) {
     row.classList.add("clickable");
     row.tabIndex = 0;
@@ -174,7 +270,7 @@ function hasMatch(item, children, values) {
   return (children.get(item.id) || []).some(child => hasMatch(child, children, values));
 }
 
-function renderBranch(item, children, values, describe, type) {
+function renderBranch(item, children, values, describe, type, depth) {
   if (!hasMatch(item, children, values)) return null;
   const descendants = children.get(item.id) || [];
   const key = `${type}:${item.id}`;
@@ -182,15 +278,16 @@ function renderBranch(item, children, values, describe, type) {
   const wrapper = element("div", "tree-node");
   const details = describe(item);
   wrapper.append(nodeRow({
-    ...details, type, hasChildren: descendants.length > 0, collapsed,
+    ...details, type, depth, hasChildren: descendants.length > 0, collapsed,
     selected: state.selected?.type === type && state.selected.id === item.id,
-    select: () => { state.selected = { type, id: item.id }; renderDetails(); },
+    select: () => { state.selected = { type, id: item.id }; renderDetails(); loadDetail(type, item.id); },
     toggle: () => { collapsed ? state.collapsed.delete(key) : state.collapsed.add(key); render(); },
   }));
   if (descendants.length && !collapsed) {
     const childList = element("div", "tree-children");
+    childList.setAttribute("role", "group");
     for (const child of descendants) {
-      const childNode = renderBranch(child, children, values, describe, type);
+      const childNode = renderBranch(child, children, values, describe, type, depth + 1);
       if (childNode) childList.append(childNode);
     }
     wrapper.append(childList);
@@ -205,15 +302,16 @@ function groupNode(key, title, count, roots, children, values, describe, type) {
     ? state.requirements.filter(item => item.reconciliation_state === "implemented").length
     : state.tasks.filter(item => item.state === "complete").length;
   wrapper.append(nodeRow({
-    title: `${title} (${count})`, group: true, hasChildren: roots.length > 0, collapsed,
+    title: `${title} (${count})`, group: true, depth: 0, hasChildren: roots.length > 0, collapsed,
     stateValue: complete === count && count > 0 ? (type === "requirement" ? "implemented" : "complete") : "in_progress",
     stateLabel: `${complete}/${count} ${type === "requirement" ? "implemented" : "complete"}`,
     toggle: () => { collapsed ? state.collapsedGroups.delete(key) : state.collapsedGroups.add(key); render(); },
   }));
   if (!collapsed) {
     const childList = element("div", "tree-children");
+    childList.setAttribute("role", "group");
     for (const root of roots) {
-      const child = renderBranch(root, children, values, describe, type);
+      const child = renderBranch(root, children, values, describe, type, 1);
       if (child) childList.append(child);
     }
     if (!childList.children.length) childList.append(element("div", "empty", count ? "No items match the filter." : "No items found."));
@@ -225,9 +323,19 @@ function groupNode(key, title, count, roots, children, values, describe, type) {
 function renderExplorer() {
   elements.explorer.replaceChildren();
   elements.explorer.className = "tree";
+  elements.explorer.setAttribute("role", "tree");
+  const header = element("div", "tree-header");
+  header.append(
+    headerCell("Item"),
+    headerCell("Lifecycle", "Shows whether the item is active or retired."),
+    headerCell("Work state", "Shows the requirement reconciliation state or the task progress state."),
+    headerCell("Ready", "Shows whether the item meets all rules that permit new work. Open the item to see blockers."),
+    headerCell(""),
+  );
+  elements.explorer.append(header);
   const requirementOrder = (left, right) => left.id.localeCompare(right.id);
   const requirements = graph(state.requirements, item => item.revision.parents.map(parent => parent.id), requirementOrder);
-  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state];
+  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state, ...(item.readiness?.blockers || [])];
   describeRequirement = item => {
     const actions = [{ label: "Copy ID", run: () => copy(`${item.id}@${item.current_revision}`) }];
     if (item.lifecycle_state !== "retired") {
@@ -236,7 +344,22 @@ function renderExplorer() {
         if (!commit) return;
         const result = window.prompt("Result: code_changed or existing_code_confirmed", "code_changed");
         if (!result) return;
-        mutate(`/v1/requirements/${encodeURIComponent(item.id)}/confirm`, { commit, result });
+        const taskId = window.prompt("Completed task ID (optional):", "") || "";
+        const raw = window.prompt("Pull request URL (optional):", "") || "";
+        let pullRequest;
+        if (raw) {
+          try {
+            const url = new URL(raw);
+            const parts = url.pathname.split("/").filter(Boolean);
+            if (parts.length < 4 || parts.at(-2) !== "pull" || !Number(parts.at(-1))) throw new Error("Pull request URL is invalid.");
+            pullRequest = { repository: `${url.host}/${parts[0]}/${parts[1]}`, number: Number(parts.at(-1)), url: raw };
+          } catch (error) {
+            elements.error.textContent = error.message;
+            elements.error.hidden = false;
+            return;
+          }
+        }
+        mutate(`/v1/requirements/${encodeURIComponent(item.id)}/confirm`, { commit, result, task_id: taskId, pull_request: pullRequest });
       } });
       actions.push({ label: "Retire…", run: () => {
         if (window.confirm(`Retire requirement ${item.id}?`)) mutate(`/v1/requirements/${encodeURIComponent(item.id)}/retire`, {});
@@ -244,13 +367,14 @@ function renderExplorer() {
     }
     return {
       id: `${item.id}@${item.current_revision}`, title: item.revision.title,
-      lifecycleValue: item.lifecycle_state, stateValue: item.reconciliation_state, actions,
+      iconName: item.revision.level, lifecycleValue: item.lifecycle_state, stateValue: item.reconciliation_state,
+      ready: item.readiness?.ready, actions,
     };
   };
 
   const taskOrder = (left, right) => right.priority - left.priority || left.id.localeCompare(right.id);
   const tasks = graph(state.tasks, item => item.depends_on || [], taskOrder);
-  const taskValues = item => [item.id, item.title, item.description, item.state, ...(item.requirements || []).map(link => link.requirement)];
+  const taskValues = item => [item.id, item.title, item.description, item.state, ...(item.requirements || []).map(link => link.requirement), ...(item.readiness?.blockers || [])];
   describeTask = item => {
     const lease = state.leases.find(value => value.task_id === item.id);
     const actions = [{ label: "Copy ID", run: () => copy(item.id) }];
@@ -260,6 +384,9 @@ function renderExplorer() {
       const ttl = window.prompt("Lease duration:", "30m");
       if (!ttl) return;
       mutate(`/v1/tasks/${encodeURIComponent(item.id)}/lease`, { agent, ttl });
+    } });
+    if (item.state === "open" && !lease) actions.push({ label: "Close…", run: () => {
+      if (window.confirm(`Close task ${item.id} without completing it?`)) mutate(`/v1/tasks/${encodeURIComponent(item.id)}/close`, {});
     } });
     if (lease) actions.push({ label: "Complete…", run: () => {
       const commit = window.prompt(`Git commit for ${item.id}:`);
@@ -283,7 +410,8 @@ function renderExplorer() {
     } });
     return {
       id: `${item.id}@${item.version}`, title: item.title,
-      stateValue: item.state, actions,
+      meta: item.pull_requests?.length ? `${item.pull_requests.length} PR` : "",
+      stateValue: item.state, ready: item.readiness?.ready, leaseLabel: lease ? `leased · ${lease.agent_id}` : "", actions,
     };
   };
 
@@ -300,7 +428,8 @@ function property(list, label, value) {
 function detailActions(actions) {
   const bar = element("div", "detail-actions");
   for (const action of actions) {
-    const control = element("button", "", action.label.replace("…", ""));
+    const control = element("button");
+    control.append(icon(actionIcon(action.label)), element("span", "", action.label.replace("…", "")));
     control.type = "button";
     control.addEventListener("click", action.run);
     bar.append(control);
@@ -314,6 +443,22 @@ function detailSection(title, text) {
   return section;
 }
 
+function detailItems(title, items) {
+  const section = element("section", "detail-section");
+  section.append(element("h3", "", title));
+  const list = element("ul", "detail-list");
+  for (const item of items) list.append(element("li", "", item));
+  if (!items.length) list.append(element("li", "", "None"));
+  section.append(list);
+  return section;
+}
+
+function detailTitle(iconName, text) {
+  const title = element("h2", "detail-title");
+  title.append(icon(iconName, `item-icon ${iconName}`), element("span", "", text));
+  return title;
+}
+
 function renderDetails() {
   elements.details.replaceChildren();
   elements.details.className = "details";
@@ -323,34 +468,47 @@ function renderDetails() {
     return;
   }
   if (state.selected.type === "requirement") {
-    const item = state.requirements.find(value => value.id === state.selected.id);
+    const summary = state.requirements.find(value => value.id === state.selected.id);
+    const item = state.details.get(`requirement:${state.selected.id}`) || summary;
     if (!item) { state.selected = null; renderDetails(); return; }
     const description = describeRequirement(item);
-    elements.details.append(element("h2", "detail-title", `${item.id}@${item.current_revision}: ${item.revision.title}`));
+    elements.details.append(detailTitle(item.revision.level, `${item.id}@${item.current_revision}: ${item.revision.title}`));
     const statuses = element("div", "detail-statuses");
-    statuses.append(element("span", `detail-status lifecycle ${item.lifecycle_state}`, item.lifecycle_state));
-    statuses.append(element("span", `detail-status node-state ${item.reconciliation_state}`, item.reconciliation_state.replaceAll("_", " ")));
+    statuses.append(statusChip(item.lifecycle_state));
+    statuses.append(statusChip(item.reconciliation_state));
+    if (item.readiness?.ready) statuses.append(statusChip("ready"));
     elements.details.append(statuses);
     elements.details.append(detailActions(description.actions));
     const properties = element("div", "properties");
     property(properties, "ID", item.id);
     property(properties, "Revision", String(item.current_revision));
     property(properties, "Level", item.revision.level);
-    property(properties, "Lifecycle", item.lifecycle_state);
-    property(properties, "Reconciliation", item.reconciliation_state);
     property(properties, "Parents", item.revision.parents.map(parent => `${parent.id}@${parent.revision}`).join(", "));
     property(properties, "Depends on", (item.revision.dependencies || []).map(value => `${value.id}@${value.revision}`).join(", "));
     property(properties, "Actor", item.revision.actor_id);
     property(properties, "Created", new Date(item.revision.created_at).toLocaleString());
     elements.details.append(properties, detailSection("Statement", item.revision.statement));
+    if (!item.readiness) elements.details.append(detailSection("History and readiness", "Loading…"));
+    else {
+      elements.details.append(detailItems("Readiness", item.readiness.ready ? ["Ready"] : item.readiness.blockers));
+      elements.details.append(detailItems("Revision history", (item.revision_history || []).map(value => `Revision ${value.revision}: ${value.title} — ${new Date(value.created_at).toLocaleString()} — ${value.actor_id}`)));
+      elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.field}: ${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
+      elements.details.append(detailItems("Confirmations", (item.confirmations || []).map(value => `${value.result} — ${value.commit}${value.task_id ? ` — ${value.task_id}` : ""}${value.pull_request ? ` — ${value.pull_request.url}` : ""}`)));
+      elements.details.append(detailItems("Open causes", (item.open_causes || []).map(value => `${value.requirement.id}@${value.requirement.revision}`)));
+    }
     return;
   }
-  const item = state.tasks.find(value => value.id === state.selected.id);
+  const summary = state.tasks.find(value => value.id === state.selected.id);
+  const item = state.details.get(`task:${state.selected.id}`) || summary;
   if (!item) { state.selected = null; renderDetails(); return; }
   const description = describeTask(item);
   const lease = state.leases.find(value => value.task_id === item.id);
-  elements.details.append(element("h2", "detail-title", `${item.id}: ${item.title}`));
-  elements.details.append(element("div", `detail-status node-state ${item.state}`, item.state.replaceAll("_", " ")));
+  elements.details.append(detailTitle("task", `${item.id}: ${item.title}`));
+  const statuses = element("div", "detail-statuses");
+  statuses.append(statusChip(item.state));
+  if (item.readiness?.ready) statuses.append(statusChip("ready"));
+  if (lease) statuses.append(statusChip("in_progress", `leased · ${lease.agent_id}`));
+  elements.details.append(statuses);
   elements.details.append(detailActions(description.actions));
   const properties = element("div", "properties");
   property(properties, "ID", item.id);
@@ -359,18 +517,34 @@ function renderDetails() {
   property(properties, "Depends on", (item.depends_on || []).join(", "));
   property(properties, "Requirements", (item.requirements || []).map(link => `${link.requirement} (${link.purpose})`).join(", "));
   property(properties, "Commit", item.completed_commit);
+  property(properties, "Pull requests", (item.pull_requests || []).map(value => value.url).join(", "));
   property(properties, "Lease", lease?.lease_id);
   property(properties, "Agent", lease?.agent_id);
   property(properties, "Expires", lease ? new Date(lease.expires_at).toLocaleString() : "");
   elements.details.append(properties, detailSection("Description", item.description));
+  if (!item.readiness) elements.details.append(detailSection("History and readiness", "Loading…"));
+  else {
+    elements.details.append(detailItems("Readiness", item.readiness.ready ? ["Ready"] : item.readiness.blockers));
+    elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
+  }
 }
 
 function leaseCell(className, text) { return element("div", `lease-cell ${className}`, text); }
+
+function remainingTime(value) {
+  const milliseconds = new Date(value).getTime() - Date.now();
+  const minutes = Math.max(0, Math.ceil(milliseconds / 60000));
+  if (minutes < 60) return `${minutes}m left`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m left`;
+}
 
 function renderLeases() {
   elements.leases.replaceChildren();
   elements.leases.className = "lease-list";
   elements.leaseCount.textContent = state.leases.length;
+  elements.leasePanel.classList.toggle("empty", state.leases.length === 0);
+  elements.horizontalSplitter.hidden = state.leases.length === 0;
   const header = element("div", "lease-header");
   for (const label of ["Lease", "Task", "Agent", "Fence", "Claimed", "Expires", "Actions"]) header.append(leaseCell("", label));
   elements.leases.append(header);
@@ -379,23 +553,31 @@ function renderLeases() {
     return;
   }
   for (const lease of state.leases) {
-    const row = element("div", "lease-row");
+    const expiring = new Date(lease.expires_at).getTime() - Date.now() < 5 * 60000;
+    const row = element("div", `lease-row${expiring ? " expiring" : ""}`);
+    const leaseID = leaseCell("lease-id");
+    leaseID.append(icon("lease", "status-icon"), element("span", "", lease.lease_id));
+    const expiry = leaseCell(`lease-expiry${expiring ? " expiring" : ""}`);
+    expiry.title = new Date(lease.expires_at).toLocaleString();
+    expiry.append(icon(expiring ? "warning" : "progress", "status-icon"), element("span", "", remainingTime(lease.expires_at)));
     row.append(
-      leaseCell("lease-id", lease.lease_id),
+      leaseID,
       leaseCell("lease-task", lease.task_id),
       leaseCell("", lease.agent_id),
       leaseCell("", String(lease.fence)),
       leaseCell("", new Date(lease.claimed_at).toLocaleString()),
-      leaseCell("", new Date(lease.expires_at).toLocaleString()),
+      expiry,
     );
     const actions = element("div", "lease-actions");
     const heartbeat = element("button", "", "Heartbeat");
+    heartbeat.prepend(icon("refresh"));
     heartbeat.type = "button";
     heartbeat.addEventListener("click", () => {
       const ttl = window.prompt("Extend lease by:", "30m");
       if (ttl) mutate(`/v1/leases/${encodeURIComponent(lease.lease_id)}/heartbeat`, { fence: lease.fence, ttl });
     });
     const release = element("button", "", "Release");
+    release.prepend(icon("retired"));
     release.type = "button";
     release.addEventListener("click", () => {
       if (window.confirm(`Release lease ${lease.lease_id}?`)) mutate(`/v1/leases/${encodeURIComponent(lease.lease_id)}/release`, { fence: lease.fence });
@@ -408,16 +590,17 @@ function renderLeases() {
 
 function renderSummary() {
   const values = [
-    [state.requirements.length, "requirements"],
-    [state.requirements.filter(item => item.reconciliation_state === "implemented").length, "implemented"],
-    [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired"],
-    [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation"],
-    [state.tasks.filter(item => item.state === "open").length, "open tasks"],
-    [state.tasks.filter(item => item.state === "complete").length, "complete tasks"],
+    [state.requirements.length, "requirements", "requirement"],
+    [state.requirements.filter(item => item.reconciliation_state === "implemented").length, "implemented", "check"],
+    [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired", "retired"],
+    [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation", "warning"],
+    [state.tasks.filter(item => item.state === "open").length, "open tasks", "pending"],
+    [state.tasks.filter(item => item.state === "complete").length, "complete tasks", "check"],
+    [state.leases.length, "active leases", "lease"],
   ];
-  elements.summary.replaceChildren(...values.map(([value, label]) => {
+  elements.summary.replaceChildren(...values.map(([value, label, iconName]) => {
     const item = element("span", "summary-item");
-    item.append(element("strong", "", String(value)), ` ${label}`);
+    item.append(icon(iconName, "status-icon"), element("strong", "", String(value)), ` ${label}`);
     return item;
   }));
 }
@@ -436,6 +619,49 @@ function connect() {
     elements.connectionText.textContent = "Reconnecting";
   };
 }
+
+function dragSplitter(splitter, move) {
+  splitter.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    splitter.setPointerCapture(event.pointerId);
+    const onMove = pointerEvent => move(pointerEvent);
+    const onUp = pointerEvent => {
+      splitter.releasePointerCapture(pointerEvent.pointerId);
+      splitter.removeEventListener("pointermove", onMove);
+    };
+    splitter.addEventListener("pointermove", onMove);
+    splitter.addEventListener("pointerup", onUp, { once: true });
+  });
+}
+
+dragSplitter(elements.verticalSplitter, event => {
+  const bounds = elements.content.getBoundingClientRect();
+  const width = Math.max(420, Math.min(event.clientX - bounds.left, bounds.width - 305));
+  elements.content.style.setProperty("--explorer-width", `${width}px`);
+});
+
+dragSplitter(elements.horizontalSplitter, event => {
+  const summaryHeight = elements.summary.getBoundingClientRect().height;
+  const height = Math.max(70, Math.min(window.innerHeight - event.clientY - summaryHeight, window.innerHeight * .55));
+  document.documentElement.style.setProperty("--lease-height", `${height}px`);
+});
+
+elements.verticalSplitter.addEventListener("keydown", event => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const bounds = elements.content.getBoundingClientRect();
+  const current = elements.verticalSplitter.getBoundingClientRect().left - bounds.left;
+  const width = Math.max(420, Math.min(current + (event.key === "ArrowRight" ? 24 : -24), bounds.width - 305));
+  elements.content.style.setProperty("--explorer-width", `${width}px`);
+});
+
+elements.horizontalSplitter.addEventListener("keydown", event => {
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+  event.preventDefault();
+  const current = elements.leasePanel.getBoundingClientRect().height;
+  const height = Math.max(70, Math.min(current + (event.key === "ArrowUp" ? 24 : -24), window.innerHeight * .55));
+  document.documentElement.style.setProperty("--lease-height", `${height}px`);
+});
 
 elements.refresh.addEventListener("click", refresh);
 elements.filter.addEventListener("input", event => { state.filter = event.target.value.trim().toLowerCase(); render(); });

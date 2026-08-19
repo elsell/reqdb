@@ -62,6 +62,7 @@ Actions:
   create     Create a task from a file
   lease      Lease a task to an agent
   complete   Complete a leased task
+  close      Close an open task without completing it
   link-pr    Link a pull request to a task
 
 Use "reqdb task ACTION --help" for action options.
@@ -147,6 +148,8 @@ Usage:
 
 Options:
   --result RESULT   code_changed or existing_code_confirmed
+  --task ID         Completed task that produced the implementation
+  --pr URL           Pull request associated with the confirmation
 `,
 	"requirement retire": `Retire a requirement without deleting its history.
 
@@ -187,6 +190,11 @@ Usage:
 
 Usage:
   reqdb task complete ID --lease LEASE --fence NUMBER --commit SHA [options]
+`,
+	"task close": `Close an open, unleased task without completing it.
+
+Usage:
+  reqdb task close ID [options]
 `,
 	"task link-pr": `Link a GitHub pull request to a task.
 
