@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elsell/reqdb/internal/domain"
 )
@@ -127,6 +129,10 @@ func printRequirement(data json.RawMessage) error {
 }
 
 func printRequirementTree(data json.RawMessage) error {
+	return printRequirementTreeWithColor(data, terminalColorEnabled())
+}
+
+func printRequirementTreeWithColor(data json.RawMessage, color bool) error {
 	var graph domain.RequirementGraph
 	if err := json.Unmarshal(data, &graph); err != nil {
 		return err
@@ -173,14 +179,11 @@ func printRequirementTree(data json.RawMessage) error {
 		}
 	}
 	less(roots)
-	table := newTable()
-	fmt.Fprintln(table, "REQUIREMENT\tLEVEL\tSTATE\tTITLE")
+	widths := traceColumnWidths(items, graph.Tasks)
+	fmt.Printf("%-*s  %-*s  %-*s  %s\n", widths.requirement, "REQUIREMENT", widths.level, "LEVEL", widths.state, "STATE", "TITLE")
 	expanded := map[string]bool{}
 	for _, root := range roots {
-		printTreeNode(table, root, "", true, true, children, tasks, map[string]bool{}, expanded)
-	}
-	if err := table.Flush(); err != nil {
-		return err
+		printTreeNode(os.Stdout, root, "", true, true, children, tasks, map[string]bool{}, expanded, widths, color)
 	}
 	hasDependencies := false
 	for _, item := range items {
@@ -200,7 +203,32 @@ func printRequirementTree(data json.RawMessage) error {
 	return nil
 }
 
-func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, tasks map[string][]domain.Task, path, expanded map[string]bool) {
+type traceWidths struct {
+	requirement int
+	level       int
+	state       int
+}
+
+func traceColumnWidths(requirements []domain.Requirement, tasks []domain.Task) traceWidths {
+	widths := traceWidths{requirement: len("REQUIREMENT"), level: len("LEVEL"), state: len("STATE")}
+	for _, item := range requirements {
+		widths.requirement = max(widths.requirement, utf8.RuneCountInString(item.ID)+len(fmt.Sprintf("@%d", item.Revision.Revision))+16)
+		widths.level = max(widths.level, utf8.RuneCountInString(item.Revision.Level)+2)
+		state := string(item.ReconciliationState)
+		if item.LifecycleState == domain.Retired {
+			state = string(domain.Retired)
+		}
+		widths.state = max(widths.state, utf8.RuneCountInString(state)+2)
+	}
+	for _, task := range tasks {
+		widths.requirement = max(widths.requirement, utf8.RuneCountInString(task.ID)+16)
+		widths.level = max(widths.level, len("task")+2)
+		widths.state = max(widths.state, utf8.RuneCountInString(task.State)+2)
+	}
+	return widths
+}
+
+func printTreeNode(writer io.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, tasks map[string][]domain.Task, path, expanded map[string]bool, widths traceWidths, color bool) {
 	branch := ""
 	if root {
 		branch = "● "
@@ -219,7 +247,14 @@ func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix str
 	if expanded[item.ID] {
 		title += " (reference; expanded above)"
 	}
-	fmt.Fprintf(writer, "%s%s%s@%d\t%s\t%s\t%s\n", prefix, branch, item.ID, item.Revision.Revision, item.Revision.Level, state, title)
+	version := fmt.Sprintf("@%d", item.Revision.Revision)
+	firstWidth := utf8.RuneCountInString(prefix + branch + item.ID + version)
+	fmt.Fprint(writer, ansi(prefix+branch, "90", color), ansi(item.ID, "1", color), ansi(version, "90", color))
+	fmt.Fprint(writer, strings.Repeat(" ", widths.requirement-firstWidth+2))
+	level := traceBadge(item.Revision.Level, traceLevelColors[item.Revision.Level], color)
+	fmt.Fprint(writer, level, strings.Repeat(" ", widths.level-(utf8.RuneCountInString(item.Revision.Level)+2)+2))
+	stateBadge := traceBadge(state, traceStateColors[state], color)
+	fmt.Fprint(writer, stateBadge, strings.Repeat(" ", widths.state-(utf8.RuneCountInString(state)+2)+2), title, "\n")
 	if path[item.ID] || expanded[item.ID] {
 		return
 	}
@@ -241,15 +276,61 @@ func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix str
 	taskChildren := tasks[fmt.Sprintf("%s@%d", item.ID, item.Revision.Revision)]
 	for index, child := range requirementChildren {
 		isLast := index == len(requirementChildren)-1 && len(taskChildren) == 0
-		printTreeNode(writer, child, nextPrefix, isLast, false, children, tasks, nextPath, expanded)
+		printTreeNode(writer, child, nextPrefix, isLast, false, children, tasks, nextPath, expanded, widths, color)
 	}
 	for index, task := range taskChildren {
 		branch := "├── "
 		if index == len(taskChildren)-1 {
 			branch = "└── "
 		}
-		fmt.Fprintf(writer, "%s%s%s\ttask\t%s\t%s\n", nextPrefix, branch, task.ID, task.State, task.Title)
+		firstWidth := utf8.RuneCountInString(nextPrefix + branch + task.ID)
+		fmt.Fprint(writer, ansi(nextPrefix+branch, "90", color), task.ID, strings.Repeat(" ", widths.requirement-firstWidth+2))
+		level := traceBadge("task", "97;100", color)
+		fmt.Fprint(writer, level, strings.Repeat(" ", widths.level-(len("task")+2)+2))
+		stateBadge := traceBadge(task.State, traceStateColors[task.State], color)
+		fmt.Fprint(writer, stateBadge, strings.Repeat(" ", widths.state-(utf8.RuneCountInString(task.State)+2)+2), task.Title, "\n")
 	}
+}
+
+var traceLevelColors = map[string]string{
+	"business":    "97;45",
+	"stakeholder": "97;44",
+	"system":      "30;46",
+	"software":    "30;42",
+}
+
+var traceStateColors = map[string]string{
+	"implemented":          "30;42",
+	"unimplemented":        "97;100",
+	"in_progress":          "97;44",
+	"ready_for_review":     "30;43",
+	"needs_reconciliation": "97;41",
+	"retired":              "97;100",
+	"open":                 "97;44",
+	"complete":             "30;42",
+	"closed":               "97;100",
+}
+
+func traceBadge(value, colors string, enabled bool) string {
+	if colors == "" {
+		colors = "97;100"
+	}
+	return ansi(" "+value+" ", colors, enabled)
+}
+
+func ansi(value, codes string, enabled bool) string {
+	if !enabled {
+		return value
+	}
+	return "\x1b[" + codes + "m" + value + "\x1b[0m"
+}
+
+func terminalColorEnabled() bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	info, err := os.Stdout.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func printImpact(data json.RawMessage) error {

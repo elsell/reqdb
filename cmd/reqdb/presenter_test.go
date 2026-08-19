@@ -68,6 +68,24 @@ func TestTraceUsesTreeBranches(t *testing.T) {
 	}
 }
 
+func TestTraceColorsRequirementMetadata(t *testing.T) {
+	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Implemented, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
+	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}
+	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root, child}})
+	output := captureOutput(t, func() error { return printRequirementTreeWithColor(data, true) })
+	for _, value := range []string{
+		"\x1b[90m└── \x1b[0m",
+		"\x1b[1mSTR-TEST-001\x1b[0m",
+		"\x1b[90m@1\x1b[0m",
+		"\x1b[97;44m stakeholder \x1b[0m",
+		"\x1b[97;100m unimplemented \x1b[0m",
+	} {
+		if !strings.Contains(output, value) {
+			t.Fatalf("colored trace does not contain %q: %q", value, output)
+		}
+	}
+}
+
 func TestTraceShowsLinkedTask(t *testing.T) {
 	root := domain.Requirement{ID: "SWR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Calculate"}}
 	task := domain.Task{ID: "T-1", Title: "Implement calculation", State: "open", Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-TEST-001@1", Purpose: "implement"}}}
