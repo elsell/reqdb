@@ -54,12 +54,17 @@ type Authorizer interface {
 }
 
 type Event struct {
-	Name          string
-	CorrelationID string
-	CausationID   string
-	Fields        map[string]any
+	Sequence      uint64         `json:"sequence"`
+	Name          string         `json:"name"`
+	CorrelationID string         `json:"correlation_id"`
+	CausationID   string         `json:"causation_id"`
+	Fields        map[string]any `json:"fields,omitempty"`
 }
 
 type EventSink interface {
 	Record(context.Context, Event)
+}
+
+type EventSource interface {
+	Subscribe() (<-chan Event, func())
 }

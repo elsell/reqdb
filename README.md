@@ -26,6 +26,9 @@ make build
 build/reqdb serve --db reqdb.sqlite --listen 127.0.0.1:8080
 ```
 
+Open `http://127.0.0.1:8080` to see the live requirement and task trees. The UI
+is in the binary. It needs no separate build or server.
+
 Use the same binary as the client:
 
 ```text

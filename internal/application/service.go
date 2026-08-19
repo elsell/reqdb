@@ -54,6 +54,10 @@ func (service Service) event(ctx context.Context, name string, fields map[string
 	}
 }
 
+func (service Service) WatchEvents(ctx context.Context, actor string) error {
+	return service.authorize(ctx, actor, "event.read", "")
+}
+
 func DecodeRequirement(reader io.Reader) (domain.RequirementInput, error) {
 	var node yaml.Node
 	decoder := yaml.NewDecoder(reader)
@@ -244,13 +248,21 @@ func (service Service) Heartbeat(ctx context.Context, id string, fence int, ttl 
 	if err := service.authorize(ctx, actor, "lease.heartbeat", id); err != nil {
 		return domain.Lease{}, err
 	}
-	return service.Store.Heartbeat(ctx, id, fence, ttl, actor)
+	lease, err := service.Store.Heartbeat(ctx, id, fence, ttl, actor)
+	if err == nil {
+		service.event(ctx, "lease.heartbeat", map[string]any{"lease_id": id, "task_id": lease.TaskID})
+	}
+	return lease, err
 }
 func (service Service) Release(ctx context.Context, id string, fence int, actor string) error {
 	if err := service.authorize(ctx, actor, "lease.release", id); err != nil {
 		return err
 	}
-	return service.Store.Release(ctx, id, fence, actor)
+	err := service.Store.Release(ctx, id, fence, actor)
+	if err == nil {
+		service.event(ctx, "lease.released", map[string]any{"lease_id": id})
+	}
+	return err
 }
 func (service Service) CompleteTask(ctx context.Context, id, lease string, fence int, commit, actor string) (domain.Task, error) {
 	if err := service.authorize(ctx, actor, "task.complete", id); err != nil {
@@ -269,7 +281,11 @@ func (service Service) LinkPullRequest(ctx context.Context, id string, pr domain
 	if pr.Repository == "" || pr.URL == "" || pr.Number < 1 {
 		return errors.New("pull request repository, number, and URL are required")
 	}
-	return service.Store.LinkPullRequest(ctx, id, pr, actor)
+	err := service.Store.LinkPullRequest(ctx, id, pr, actor)
+	if err == nil {
+		service.event(ctx, "task.pr_linked", map[string]any{"task_id": id, "pull_request": pr.URL})
+	}
+	return err
 }
 func (service Service) ListAudit(ctx context.Context, entity, cursor string, limit int, actor string) (domain.Page[domain.AuditEvent], error) {
 	if err := service.authorize(ctx, actor, "audit.read", entity); err != nil {

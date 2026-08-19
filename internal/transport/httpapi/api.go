@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,9 +13,13 @@ import (
 
 	"github.com/elsell/reqdb/internal/application"
 	"github.com/elsell/reqdb/internal/domain"
+	"github.com/elsell/reqdb/internal/ports"
 )
 
-type API struct{ Service application.Service }
+type API struct {
+	Service application.Service
+	Events  ports.EventSource
+}
 type envelope struct {
 	Data  any       `json:"data,omitempty"`
 	Error *apiError `json:"error,omitempty"`
@@ -110,8 +115,58 @@ func (api API) route(w http.ResponseWriter, r *http.Request) {
 		api.audit(w, r)
 	case "render":
 		api.render(w, r)
+	case "events":
+		api.events(w, r)
 	default:
 		fail(w, r, domain.ErrNotFound)
+	}
+}
+
+func (api API) events(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet || api.Events == nil {
+		fail(w, r, domain.ErrNotFound)
+		return
+	}
+	if err := api.Service.WatchEvents(r.Context(), actor(r)); err != nil {
+		fail(w, r, err)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		fail(w, r, errors.New("event streaming is not supported"))
+		return
+	}
+	// The server has a write timeout for normal API requests. An event stream
+	// stays open until the client disconnects.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	stream, cancel := api.Events.Subscribe()
+	defer cancel()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	_, _ = io.WriteString(w, "event: ready\ndata: {}\n\n")
+	flusher.Flush()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, open := <-stream:
+			if !open {
+				return
+			}
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			_, _ = fmt.Fprintf(w, "id: %d\nevent: change\ndata: %s\n\n", event.Sequence, data)
+			flusher.Flush()
+		case <-heartbeat.C:
+			_, _ = io.WriteString(w, ": keep-alive\n\n")
+			flusher.Flush()
+		}
 	}
 }
 

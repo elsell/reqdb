@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>reqdb</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>reqdb</h1>
+      <p>Requirements and implementation work</p>
+    </div>
+    <div class="connection" aria-live="polite">
+      <span id="connection-dot" class="connection-dot"></span>
+      <span id="connection-text">Connecting</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="toolbar" aria-label="Tree controls">
+      <label class="search">
+        <span>Filter</span>
+        <input id="filter" type="search" placeholder="ID, title, state, or text" autocomplete="off">
+      </label>
+      <button id="refresh" type="button">Refresh</button>
+      <span id="updated" class="updated">Not loaded</span>
+    </section>
+
+    <section id="summary" class="summary" aria-label="Summary"></section>
+    <div id="error" class="error" role="alert" hidden></div>
+
+    <div class="trees">
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Requirement tree</h2>
+            <p>Business intent through software behavior</p>
+          </div>
+          <span id="requirement-count" class="count">0</span>
+        </div>
+        <div id="requirements" class="tree loading">Loading requirements…</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Task tree</h2>
+            <p>Work ordered by task dependencies</p>
+          </div>
+          <span id="task-count" class="count">0</span>
+        </div>
+        <div id="tasks" class="tree loading">Loading tasks…</div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

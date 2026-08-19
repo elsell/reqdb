@@ -23,6 +23,7 @@ import (
 	"github.com/elsell/reqdb/internal/observability"
 	"github.com/elsell/reqdb/internal/store/sqlite"
 	"github.com/elsell/reqdb/internal/transport/httpapi"
+	"github.com/elsell/reqdb/internal/transport/webui"
 )
 
 func main() {
@@ -125,9 +126,13 @@ func serve(args []string) error {
 	}
 	defer store.Close()
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	events := observability.Fanout{observability.LogSink{Logger: logger}, observability.OTelSink{}}
+	broker := observability.NewBroker()
+	events := observability.Fanout{observability.LogSink{Logger: logger}, observability.OTelSink{}, broker}
 	service := application.Service{Store: store, Auth: application.AllowAll{}, Events: events}
-	handler := httpapi.API{Service: service}.Handler()
+	mux := http.NewServeMux()
+	mux.Handle("/v1/", httpapi.API{Service: service, Events: broker}.Handler())
+	mux.Handle("/", webui.Handler())
+	handler := mux
 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	prune := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

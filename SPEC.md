@@ -8,8 +8,9 @@ This file is normative. `shall` marks a rule.
 also coordinate the tasks that implement or reconcile those requirements.
 
 Version 1 shall manage requirements, traceability, reconciliation, tasks,
-leases, pull request links, audit events, and rendered views. It shall not run
-tests, manage development constraints, or manage agent workflows.
+leases, pull request links, audit events, rendered views, and a live graph
+view. It shall not run tests, manage development constraints, or manage agent
+workflows.
 
 ## Authority
 
@@ -19,6 +20,10 @@ tests, manage development constraints, or manage agent workflows.
 - YAML shall be an input format only.
 - Requirement revisions and audit events shall be append-only.
 - Rendered files shall not be authoritative.
+
+The server shall provide an embedded UI for the requirement and task trees.
+The UI shall read the API and use an event stream to detect changes. Event
+notices shall not contain authoritative graph data.
 
 ## Requirement hierarchy
 
