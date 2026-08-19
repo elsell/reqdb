@@ -228,6 +228,11 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 		}
 		body := map[string]any{"commit": option(args, "--commit"), "result": option(args, "--result")}
 		return call(ctx, api, http.MethodPost, "/v1/requirements/"+url.PathEscape(args[1])+"/confirm", body, jsonOutput)
+	case "retire":
+		if len(args) < 2 {
+			return withHelp("a requirement ID is required", actionHelp["requirement retire"])
+		}
+		return call(ctx, api, http.MethodPost, "/v1/requirements/"+url.PathEscape(args[1])+"/retire", nil, jsonOutput)
 	case "render":
 		if len(args) < 2 {
 			return withHelp("a requirement ID is required", actionHelp["requirement render"])

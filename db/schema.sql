@@ -2,6 +2,8 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE requirement (
     id TEXT PRIMARY KEY,
     current_revision INTEGER NOT NULL CHECK (current_revision > 0),
+    lifecycle_state TEXT NOT NULL DEFAULT 'active'
+        CHECK (lifecycle_state IN ('active', 'retired')),
     reconciliation_state TEXT NOT NULL
         CHECK (reconciliation_state IN (
             'unimplemented', 'in_progress', 'implemented',

@@ -182,10 +182,10 @@ END;
 	}
 	defer database.Close()
 	var migrations int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002')`).Scan(&migrations); err != nil {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003')`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 3 {
+	if migrations != 4 {
 		t.Fatalf("database recorded %d expected migrations", migrations)
 	}
 	var dependencyTables int
@@ -194,6 +194,13 @@ END;
 	}
 	if dependencyTables != 1 {
 		t.Fatal("migration did not add the requirement dependency table")
+	}
+	var lifecycleColumns int
+	if err := database.QueryRow(`SELECT count(*) FROM pragma_table_info('requirement') WHERE name='lifecycle_state'`).Scan(&lifecycleColumns); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycleColumns != 1 {
+		t.Fatal("migration did not add requirement lifecycle state")
 	}
 	var columns int
 	if err := database.QueryRow(`SELECT count(*) FROM pragma_table_info('audit_event') WHERE name IN ('correlation_id','causation_id')`).Scan(&columns); err != nil {
@@ -365,5 +372,63 @@ func TestTransitiveRequirementDependenciesBlockTask(t *testing.T) {
 	}
 	if len(ready.Items) != 0 {
 		t.Fatalf("transitively blocked task is ready: %+v", ready.Items)
+	}
+}
+
+func TestRetireRequirementInvalidatesDownstreamAndBlocksTasks(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	base := requirement("SWR-BASE-001", "software", 1)
+	consumer := requirement("SWR-CONSUMER-001", "software", 1)
+	consumer.Links.DependsOn = []string{"SWR-BASE-001@1"}
+	for _, input := range []domain.RequirementInput{base, consumer} {
+		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: input.ID}, "abc123", "code_changed", "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, task := range []domain.TaskInput{
+		{Schema: "task/v1", ID: "T-BASE", Title: "Change base", Description: "Change the base requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-BASE-001@1", Purpose: "reconcile"}}},
+		{Schema: "task/v1", ID: "T-CONSUMER", Title: "Change consumer", Description: "Change the consumer requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-CONSUMER-001@1", Purpose: "reconcile"}}},
+	} {
+		if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retired, err := store.RetireRequirement(ctx, base.ID, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.LifecycleState != domain.Retired {
+		t.Fatalf("lifecycle state is %s", retired.LifecycleState)
+	}
+	stored, err := store.GetRequirement(ctx, domain.RequirementRef{ID: consumer.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReconciliationState != domain.NeedsReconciliation {
+		t.Fatalf("consumer state is %s", stored.ReconciliationState)
+	}
+	ready, err := store.ListTasks(ctx, "", 20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ready.Items) != 0 {
+		t.Fatalf("retirement left tasks ready: %+v", ready.Items)
+	}
+	for _, taskID := range []string{"T-BASE", "T-CONSUMER"} {
+		if _, err := store.LeaseTask(ctx, taskID, "agent", time.Minute, "tester"); err == nil {
+			t.Fatalf("leased blocked task %s", taskID)
+		}
+	}
+	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: base.ID}, "def456", "code_changed", "tester"); err == nil {
+		t.Fatal("confirmed a retired requirement")
 	}
 }

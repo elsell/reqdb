@@ -5,7 +5,8 @@ const state = {
   collapsed: new Set(), collapsedGroups: new Set(),
 };
 const elements = {
-  explorer: document.querySelector("#explorer"), details: document.querySelector("#details"), summary: document.querySelector("#summary"),
+  explorer: document.querySelector("#explorer"), details: document.querySelector("#details"), leases: document.querySelector("#leases"),
+  leaseCount: document.querySelector("#lease-count"), summary: document.querySelector("#summary"),
   error: document.querySelector("#error"), updated: document.querySelector("#updated"),
   refresh: document.querySelector("#refresh"), filter: document.querySelector("#filter"),
   expandAll: document.querySelector("#expand-all"), collapseAll: document.querySelector("#collapse-all"),
@@ -352,6 +353,47 @@ function renderDetails() {
   elements.details.append(properties, detailSection("Description", item.description));
 }
 
+function leaseCell(className, text) { return element("div", `lease-cell ${className}`, text); }
+
+function renderLeases() {
+  elements.leases.replaceChildren();
+  elements.leases.className = "lease-list";
+  elements.leaseCount.textContent = state.leases.length;
+  const header = element("div", "lease-header");
+  for (const label of ["Lease", "Task", "Agent", "Fence", "Claimed", "Expires", "Actions"]) header.append(leaseCell("", label));
+  elements.leases.append(header);
+  if (!state.leases.length) {
+    elements.leases.append(element("div", "empty", "No active leases."));
+    return;
+  }
+  for (const lease of state.leases) {
+    const row = element("div", "lease-row");
+    row.append(
+      leaseCell("lease-id", lease.lease_id),
+      leaseCell("lease-task", lease.task_id),
+      leaseCell("", lease.agent_id),
+      leaseCell("", String(lease.fence)),
+      leaseCell("", new Date(lease.claimed_at).toLocaleString()),
+      leaseCell("", new Date(lease.expires_at).toLocaleString()),
+    );
+    const actions = element("div", "lease-actions");
+    const heartbeat = element("button", "", "Heartbeat");
+    heartbeat.type = "button";
+    heartbeat.addEventListener("click", () => {
+      const ttl = window.prompt("Extend lease by:", "30m");
+      if (ttl) mutate(`/v1/leases/${encodeURIComponent(lease.lease_id)}/heartbeat`, { fence: lease.fence, ttl });
+    });
+    const release = element("button", "", "Release");
+    release.type = "button";
+    release.addEventListener("click", () => {
+      if (window.confirm(`Release lease ${lease.lease_id}?`)) mutate(`/v1/leases/${encodeURIComponent(lease.lease_id)}/release`, { fence: lease.fence });
+    });
+    actions.append(heartbeat, release);
+    row.append(actions);
+    elements.leases.append(row);
+  }
+}
+
 function renderSummary() {
   const values = [
     [state.requirements.length, "requirements"],
@@ -367,7 +409,7 @@ function renderSummary() {
   }));
 }
 
-function render() { renderExplorer(); renderDetails(); renderSummary(); }
+function render() { renderExplorer(); renderDetails(); renderLeases(); renderSummary(); }
 
 function connect() {
   const events = new EventSource("/v1/events");

@@ -12,3 +12,8 @@ var Schema string
 //
 //go:embed requirement_dependency.sql
 var RequirementDependencyMigration string
+
+// RequirementLifecycleMigration adds requirement lifecycle state.
+//
+//go:embed requirement_lifecycle.sql
+var RequirementLifecycleMigration string

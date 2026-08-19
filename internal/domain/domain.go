@@ -13,11 +13,18 @@ var ErrConflict = errors.New("conflict")
 
 type ReconciliationState string
 
+type LifecycleState string
+
 const (
 	Unimplemented       ReconciliationState = "unimplemented"
 	InProgress          ReconciliationState = "in_progress"
 	Implemented         ReconciliationState = "implemented"
 	NeedsReconciliation ReconciliationState = "needs_reconciliation"
+)
+
+const (
+	Active  LifecycleState = "active"
+	Retired LifecycleState = "retired"
 )
 
 type RequirementRef struct {
@@ -53,6 +60,7 @@ type RequirementInput struct {
 type Requirement struct {
 	ID                  string              `json:"id"`
 	CurrentRevision     int                 `json:"current_revision"`
+	LifecycleState      LifecycleState      `json:"lifecycle_state"`
 	ReconciliationState ReconciliationState `json:"reconciliation_state"`
 	Revision            RequirementRevision `json:"revision"`
 }

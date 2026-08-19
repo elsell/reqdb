@@ -54,6 +54,21 @@ revision.
 `apply` shall use the expected current revision. A mismatch shall cause no
 change.
 
+## Lifecycle
+
+A requirement shall be `active` or `retired`. Retirement shall preserve all
+revisions, links, tasks, confirmations, and audit events. It shall not create a
+content revision.
+
+When a requirement is retired, the server shall mark all active, transitive
+downstream requirements as `needs_reconciliation`. It shall follow refinement and
+dependency links. It shall record the retired requirement as the cause. It
+shall not retire downstream requirements.
+
+A retired requirement cannot be revised or confirmed. A task that links to a
+retired requirement, or depends on a retired requirement, shall not be ready or
+leaseable.
+
 ## Reconciliation
 
 Reconciliation describes the relation between a requirement revision and the
@@ -155,6 +170,7 @@ The core resource commands are:
 | `requirement create --from-file FILE` | Create a requirement. |
 | `requirement update ID --from-file FILE` | Create a requirement revision. |
 | `requirement confirm ID[@REVISION] --commit SHA` | Confirm that code matches a revision. |
+| `requirement retire ID` | Retire a requirement without deleting its history. |
 | `requirement render ID` | Render one requirement and its context. |
 | `task list` | List tasks. |
 | `task get ID` | Show one task. |

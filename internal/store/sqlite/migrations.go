@@ -10,6 +10,7 @@ import (
 
 const requestIDsMigrationID = "202608180001"
 const requirementDependencyMigrationID = "202608180002"
+const requirementLifecycleMigrationID = "202608180003"
 
 type migrationRecord struct {
 	ID string `gorm:"column:id;primaryKey;size:255"`
@@ -75,6 +76,15 @@ END`).Error
 				return tx.Migrator().DropTable("requirement_dependency")
 			},
 		},
+		{
+			ID: requirementLifecycleMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(dbschema.RequirementLifecycleMigration).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropColumn("requirement", "lifecycle_state")
+			},
+		},
 	}
 }
 
@@ -99,6 +109,11 @@ func baselineLegacyDatabase(database *gorm.DB) error {
 		}
 		if err := database.Create(&migrationRecord{ID: requestIDsMigrationID}).Error; err != nil {
 			return fmt.Errorf("record request ID migration baseline: %w", err)
+		}
+	}
+	if database.Migrator().HasColumn("requirement", "lifecycle_state") {
+		if err := database.Create(&migrationRecord{ID: requirementLifecycleMigrationID}).Error; err != nil {
+			return fmt.Errorf("record requirement lifecycle migration baseline: %w", err)
 		}
 	}
 	return nil

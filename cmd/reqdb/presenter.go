@@ -67,9 +67,9 @@ func printRequirementList(data json.RawMessage) error {
 		return nil
 	}
 	table := newTable()
-	fmt.Fprintln(table, "ID\tREVISION\tLEVEL\tRECONCILIATION\tTITLE")
+	fmt.Fprintln(table, "ID\tREVISION\tLEVEL\tLIFECYCLE\tRECONCILIATION\tTITLE")
 	for _, item := range items {
-		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\n", item.ID, item.CurrentRevision, item.Revision.Level, item.ReconciliationState, item.Revision.Title)
+		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\t%s\n", item.ID, item.CurrentRevision, item.Revision.Level, item.LifecycleState, item.ReconciliationState, item.Revision.Title)
 	}
 	return table.Flush()
 }
@@ -83,6 +83,7 @@ func printRequirement(data json.RawMessage) error {
 	fields := newTable()
 	fmt.Fprintf(fields, "Title:\t%s\n", item.Revision.Title)
 	fmt.Fprintf(fields, "Level:\t%s\n", item.Revision.Level)
+	fmt.Fprintf(fields, "Lifecycle:\t%s\n", item.LifecycleState)
 	fmt.Fprintf(fields, "Reconciliation:\t%s\n", item.ReconciliationState)
 	fmt.Fprintf(fields, "Refines:\t%s\n", parentList(item.Revision.Parents))
 	fmt.Fprintf(fields, "Depends on:\t%s\n", parentList(item.Revision.Dependencies))
@@ -179,7 +180,11 @@ func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix str
 			branch = "├── "
 		}
 	}
-	fmt.Fprintf(writer, "%s%s%s@%d\t%s\t%s\t%s\n", prefix, branch, item.ID, item.Revision.Revision, item.Revision.Level, item.ReconciliationState, item.Revision.Title)
+	state := string(item.ReconciliationState)
+	if item.LifecycleState == domain.Retired {
+		state = string(domain.Retired)
+	}
+	fmt.Fprintf(writer, "%s%s%s@%d\t%s\t%s\t%s\n", prefix, branch, item.ID, item.Revision.Revision, item.Revision.Level, state, item.Revision.Title)
 	if path[item.ID] {
 		return
 	}

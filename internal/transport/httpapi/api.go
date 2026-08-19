@@ -265,6 +265,15 @@ func (api API) requirements(w http.ResponseWriter, r *http.Request, parts []stri
 		write(w, r, 200, item, "")
 		return
 	}
+	if len(parts) == 2 && parts[1] == "retire" && r.Method == http.MethodPost {
+		item, err := api.Service.RetireRequirement(r.Context(), ref.ID, actor(r))
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		write(w, r, 200, item, "")
+		return
+	}
 	fail(w, r, domain.ErrNotFound)
 }
 

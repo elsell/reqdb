@@ -44,6 +44,7 @@ func (store *Store) Close() error {
 type requirementRow struct {
 	ID                  string `gorm:"column:id;primaryKey"`
 	CurrentRevision     int
+	LifecycleState      string
 	ReconciliationState string
 	CreatedAt           string
 	UpdatedAt           string
@@ -197,7 +198,7 @@ func addRevision(tx *gorm.DB, input domain.RequirementInput, actor string) error
 func (store *Store) CreateRequirement(ctx context.Context, input domain.RequirementInput, actor string) (domain.Requirement, error) {
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		stamp := now()
-		if err := tx.Create(&requirementRow{input.ID, input.Revision, string(domain.Unimplemented), stamp, stamp}).Error; err != nil {
+		if err := tx.Create(&requirementRow{ID: input.ID, CurrentRevision: input.Revision, LifecycleState: string(domain.Active), ReconciliationState: string(domain.Unimplemented), CreatedAt: stamp, UpdatedAt: stamp}).Error; err != nil {
 			return friendlyConflict{message: fmt.Sprintf("requirement %s already exists", input.ID)}
 		}
 		if err := addRevision(tx, input, actor); err != nil {
@@ -230,6 +231,9 @@ func (store *Store) UpdateRequirement(ctx context.Context, input domain.Requirem
 		if current.CurrentRevision != expected || input.Revision != expected+1 {
 			return friendlyConflict{message: fmt.Sprintf("requirement %s is at revision %d, not revision %d", input.ID, current.CurrentRevision, expected)}
 		}
+		if current.LifecycleState == string(domain.Retired) {
+			return friendlyConflict{message: fmt.Sprintf("requirement %s is retired", input.ID)}
+		}
 		if err := addRevision(tx, input, actor); err != nil {
 			return err
 		}
@@ -254,7 +258,7 @@ JOIN d ON r.parent_id=d.id
 UNION SELECT rd.requirement_id FROM requirement_dependency rd
 JOIN requirement c ON c.id=rd.requirement_id AND c.current_revision=rd.requirement_revision
 JOIN d ON rd.dependency_id=d.id
-) SELECT q.id, q.current_revision AS revision FROM requirement q JOIN d ON d.id=q.id`
+) SELECT q.id, q.current_revision AS revision FROM requirement q JOIN d ON d.id=q.id WHERE q.lifecycle_state='active'`
 		if err := tx.Raw(query, input.ID, input.ID).Scan(&items).Error; err != nil {
 			return err
 		}
@@ -303,7 +307,7 @@ func (store *Store) GetRequirement(ctx context.Context, ref domain.RequirementRe
 		dependencies = append(dependencies, domain.RequirementRef{ID: row.DependencyID, Revision: row.DependencyRevision})
 	}
 	created, _ := time.Parse(time.RFC3339Nano, rev.CreatedAt)
-	return domain.Requirement{ID: root.ID, CurrentRevision: root.CurrentRevision, ReconciliationState: domain.ReconciliationState(root.ReconciliationState), Revision: domain.RequirementRevision{RequirementID: rev.RequirementID, Revision: rev.Revision, Level: rev.Level, Title: rev.Title, Statement: rev.Statement, Parents: parents, Dependencies: dependencies, CreatedAt: created, ActorID: rev.ActorID}}, nil
+	return domain.Requirement{ID: root.ID, CurrentRevision: root.CurrentRevision, LifecycleState: domain.LifecycleState(root.LifecycleState), ReconciliationState: domain.ReconciliationState(root.ReconciliationState), Revision: domain.RequirementRevision{RequirementID: rev.RequirementID, Revision: rev.Revision, Level: rev.Level, Title: rev.Title, Statement: rev.Statement, Parents: parents, Dependencies: dependencies, CreatedAt: created, ActorID: rev.ActorID}}, nil
 }
 
 func (store *Store) ListRequirements(ctx context.Context, cursor string, limit int, level, state string) (domain.Page[domain.Requirement], error) {
@@ -345,6 +349,9 @@ func (store *Store) ConfirmRequirement(ctx context.Context, ref domain.Requireme
 		if ref.Revision != root.CurrentRevision {
 			return ErrConflict
 		}
+		if root.LifecycleState == string(domain.Retired) {
+			return friendlyConflict{message: fmt.Sprintf("requirement %s is retired", ref.ID)}
+		}
 		if result == "" {
 			result = "code_changed"
 		}
@@ -366,6 +373,56 @@ func (store *Store) ConfirmRequirement(ctx context.Context, ref domain.Requireme
 		return domain.Requirement{}, err
 	}
 	return store.GetRequirement(ctx, ref)
+}
+
+func (store *Store) RetireRequirement(ctx context.Context, id, actor string) (domain.Requirement, error) {
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root requirementRow
+		if err := tx.First(&root, "id=?", id).Error; err != nil {
+			return ErrNotFound
+		}
+		if root.LifecycleState == string(domain.Retired) {
+			return friendlyConflict{message: fmt.Sprintf("requirement %s is already retired", id)}
+		}
+		if err := tx.Model(&requirementRow{}).Where("id=?", id).Updates(map[string]any{"lifecycle_state": string(domain.Retired), "updated_at": now()}).Error; err != nil {
+			return err
+		}
+		type downstream struct {
+			ID       string
+			Revision int
+		}
+		var items []downstream
+		query := `WITH RECURSIVE d(id) AS (
+SELECT r.child_id FROM requirement_refinement r
+JOIN requirement c ON c.id=r.child_id AND c.current_revision=r.child_revision
+WHERE r.parent_id=?
+UNION SELECT rd.requirement_id FROM requirement_dependency rd
+JOIN requirement c ON c.id=rd.requirement_id AND c.current_revision=rd.requirement_revision
+WHERE rd.dependency_id=?
+UNION SELECT r.child_id FROM requirement_refinement r
+JOIN requirement c ON c.id=r.child_id AND c.current_revision=r.child_revision
+JOIN d ON r.parent_id=d.id
+UNION SELECT rd.requirement_id FROM requirement_dependency rd
+JOIN requirement c ON c.id=rd.requirement_id AND c.current_revision=rd.requirement_revision
+JOIN d ON rd.dependency_id=d.id
+) SELECT q.id, q.current_revision AS revision FROM requirement q JOIN d ON d.id=q.id WHERE q.lifecycle_state='active'`
+		if err := tx.Raw(query, id, id).Scan(&items).Error; err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := tx.Model(&requirementRow{}).Where("id=? AND lifecycle_state='active'", item.ID).Updates(map[string]any{"reconciliation_state": string(domain.NeedsReconciliation), "updated_at": now()}).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`INSERT OR IGNORE INTO reconciliation_cause (requirement_id,requirement_revision,cause_requirement_id,cause_revision,created_at) VALUES (?,?,?,?,?)`, item.ID, item.Revision, id, root.CurrentRevision, now()).Error; err != nil {
+				return err
+			}
+		}
+		return audit(ctx, tx, actor, "requirement.retired", "requirement", id, map[string]any{"revision": root.CurrentRevision, "affected": len(items)})
+	})
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	return store.GetRequirement(ctx, domain.RequirementRef{ID: id})
 }
 
 func (store *Store) Trace(ctx context.Context, root string) ([]domain.Requirement, error) {
@@ -510,7 +567,7 @@ func (store *Store) GetTask(ctx context.Context, id string) (domain.Task, error)
 func (store *Store) ListTasks(ctx context.Context, cursor string, limit int, ready bool) (domain.Page[domain.Task], error) {
 	query := store.db.WithContext(ctx).Model(&taskRow{}).Where("task.id > ?", cursor)
 	if ready {
-		query = query.Where("task.state='open'").Where(`NOT EXISTS (SELECT 1 FROM lease WHERE lease.task_id=task.id AND lease.expires_at>?)`, now()).Where(`NOT EXISTS (SELECT 1 FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=task.id AND t.state!='complete')`).Where(requirementDependenciesReadySQL).Order("priority DESC,id")
+		query = query.Where("task.state='open'").Where(`NOT EXISTS (SELECT 1 FROM lease WHERE lease.task_id=task.id AND lease.expires_at>?)`, now()).Where(`NOT EXISTS (SELECT 1 FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=task.id AND t.state!='complete')`).Where(`NOT EXISTS (SELECT 1 FROM task_requirement tr JOIN requirement r ON r.id=tr.requirement_id WHERE tr.task_id=task.id AND r.lifecycle_state!='active')`).Where(requirementDependenciesReadySQL).Order("priority DESC,id")
 	} else {
 		query = query.Order("id")
 	}
@@ -546,7 +603,7 @@ WITH RECURSIVE deps(id, revision) AS (
 )
 SELECT 1 FROM deps d
 LEFT JOIN requirement r ON r.id=d.id
-WHERE r.id IS NULL OR r.current_revision!=d.revision OR r.reconciliation_state!='implemented'
+WHERE r.id IS NULL OR r.current_revision!=d.revision OR r.lifecycle_state!='active' OR r.reconciliation_state!='implemented'
 )`
 
 func unmetRequirementDependencies(tx *gorm.DB, taskID string) (int64, error) {
@@ -562,7 +619,7 @@ JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
 )
 SELECT count(*) FROM deps d
 LEFT JOIN requirement r ON r.id=d.id
-WHERE r.id IS NULL OR r.current_revision!=d.revision OR r.reconciliation_state!='implemented'`
+WHERE r.id IS NULL OR r.current_revision!=d.revision OR r.lifecycle_state!='active' OR r.reconciliation_state!='implemented'`
 	var count int64
 	return count, tx.Raw(query, taskID).Scan(&count).Error
 }
@@ -576,6 +633,13 @@ func (store *Store) LeaseTask(ctx context.Context, id, agent string, ttl time.Du
 		}
 		if task.State != "open" {
 			return ErrConflict
+		}
+		var retiredLinks int64
+		if err := tx.Raw(`SELECT count(*) FROM task_requirement tr JOIN requirement r ON r.id=tr.requirement_id WHERE tr.task_id=? AND r.lifecycle_state!='active'`, id).Scan(&retiredLinks).Error; err != nil {
+			return err
+		}
+		if retiredLinks > 0 {
+			return friendlyConflict{message: fmt.Sprintf("task %s links to a retired requirement", id)}
 		}
 		var blockers int64
 		tx.Raw(`SELECT count(*) FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=? AND t.state!='complete'`, id).Scan(&blockers)

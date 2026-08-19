@@ -43,6 +43,7 @@ Actions:
   create     Create a requirement
   update     Create a requirement revision
   confirm    Confirm that code matches a requirement revision
+  retire     Retire a requirement
   render     Render a requirement and its descendants
 
 Use "reqdb requirement ACTION --help" for action options.
@@ -140,6 +141,11 @@ Usage:
 
 Options:
   --result RESULT   code_changed or existing_code_confirmed
+`,
+	"requirement retire": `Retire a requirement without deleting its history.
+
+Usage:
+  reqdb requirement retire ID [options]
 `,
 	"requirement render": `Render a requirement and its descendants as Markdown.
 

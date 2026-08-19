@@ -33,6 +33,7 @@ type Store interface {
 	GetRequirement(context.Context, domain.RequirementRef) (domain.Requirement, error)
 	ListRequirements(context.Context, string, int, string, string) (domain.Page[domain.Requirement], error)
 	ConfirmRequirement(context.Context, domain.RequirementRef, string, string, string) (domain.Requirement, error)
+	RetireRequirement(context.Context, string, string) (domain.Requirement, error)
 	Trace(context.Context, string) ([]domain.Requirement, error)
 	Impact(context.Context, string) ([]domain.Requirement, error)
 	TasksForRequirements(context.Context, []domain.RequirementRef) ([]domain.Task, error)

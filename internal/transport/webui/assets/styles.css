@@ -34,10 +34,13 @@ button:hover { background: #fff; }
 button:disabled { opacity: .55; }
 .updated { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .error { padding: 4px 6px; color: #750e13; background: #fff1f1; border-bottom: 1px solid #da1e28; }
-.content { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(420px, 3fr) minmax(300px, 2fr); }
+.content { flex: 1; min-height: 180px; display: grid; grid-template-columns: minmax(420px, 3fr) minmax(300px, 2fr); }
 .explorer-panel, .detail-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .detail-panel { border-left: 1px solid #7e8791; }
 .pane-heading { height: 24px; flex: none; display: flex; align-items: center; padding: 0 6px; background: linear-gradient(#f5f6f7, var(--chrome-dark)); border-bottom: 1px solid var(--line); font-weight: 700; }
+.pane-count { margin-left: 5px; color: var(--muted); font-weight: 400; }
+.pane-count::before { content: "("; }
+.pane-count::after { content: ")"; }
 .tree { flex: 1; min-height: 0; padding: 3px 4px 8px; overflow: auto; white-space: nowrap; }
 .loading, .empty { padding: 7px; color: var(--muted); }
 .tree-node { position: relative; min-width: max-content; }
@@ -86,6 +89,16 @@ button:disabled { opacity: .55; }
 .detail-section { margin-top: 9px; }
 .detail-section h3 { margin: 0; padding: 4px 5px; background: var(--chrome); border: 1px solid #c4cad1; font-size: 12px; }
 .detail-text { margin: 0; padding: 6px; border: 1px solid #c4cad1; border-top: 0; line-height: 1.4; }
+.lease-panel { height: 145px; flex: none; display: flex; flex-direction: column; border-top: 1px solid #7e8791; }
+.lease-list { flex: 1; min-height: 0; overflow: auto; }
+.lease-header, .lease-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) minmax(110px, .7fr) minmax(110px, .7fr) 55px 155px 155px 145px; min-width: 1000px; }
+.lease-header { position: sticky; z-index: 2; top: 0; height: 21px; align-items: center; background: linear-gradient(#f7f8f9, #dce0e4); border-bottom: 1px solid var(--line); font-weight: 700; }
+.lease-row { min-height: 22px; align-items: center; border-bottom: 1px solid #d8dde2; }
+.lease-row:hover { background: var(--select); }
+.lease-cell { min-width: 0; height: 100%; padding: 3px 5px; overflow: hidden; border-right: 1px solid #c2c8cf; text-overflow: ellipsis; white-space: nowrap; }
+.lease-id, .lease-task { font-family: Consolas, "Liberation Mono", monospace; }
+.lease-actions { display: flex; gap: 3px; padding: 2px 4px; }
+.lease-actions button { height: 18px; padding: 0 5px; font-size: 11px; }
 .summary { min-height: 22px; flex: none; display: flex; align-items: center; padding: 0 5px; background: var(--chrome); border-top: 1px solid var(--line); }
 .summary-item { padding: 0 9px; border-right: 1px solid #aeb5bd; color: var(--muted); }
 .summary-item:first-child { padding-left: 0; }
@@ -98,4 +111,5 @@ button:disabled { opacity: .55; }
 @media (max-width: 850px) {
   .content { grid-template-columns: 1fr; grid-template-rows: minmax(220px, 3fr) minmax(180px, 2fr); }
   .detail-panel { border-left: 0; border-top: 1px solid #7e8791; }
+  .lease-panel { height: 125px; }
 }

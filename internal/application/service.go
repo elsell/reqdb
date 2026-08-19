@@ -173,6 +173,16 @@ func (service Service) ConfirmRequirement(ctx context.Context, ref domain.Requir
 	}
 	return item, err
 }
+func (service Service) RetireRequirement(ctx context.Context, id, actor string) (domain.Requirement, error) {
+	if err := service.authorize(ctx, actor, "requirement.retire", id); err != nil {
+		return domain.Requirement{}, err
+	}
+	item, err := service.Store.RetireRequirement(ctx, id, actor)
+	if err == nil {
+		service.event(ctx, "requirement.retired", map[string]any{"requirement_id": id})
+	}
+	return item, err
+}
 func (service Service) Trace(ctx context.Context, root, actor string) (domain.RequirementGraph, error) {
 	if err := service.authorize(ctx, actor, "requirement.read", root); err != nil {
 		return domain.RequirementGraph{}, err
@@ -304,7 +314,7 @@ func Render(requirements []domain.Requirement) string {
 	var text strings.Builder
 	for _, item := range requirements {
 		fmt.Fprintf(&text, "## %s: %s\n\n", item.ID, item.Revision.Title)
-		fmt.Fprintf(&text, "- Level: %s\n- Revision: %d\n- Reconciliation: %s\n", item.Revision.Level, item.Revision.Revision, item.ReconciliationState)
+		fmt.Fprintf(&text, "- Level: %s\n- Revision: %d\n- Lifecycle: %s\n- Reconciliation: %s\n", item.Revision.Level, item.Revision.Revision, item.LifecycleState, item.ReconciliationState)
 		if len(item.Revision.Parents) > 0 {
 			fmt.Fprint(&text, "- Refines:")
 			for _, parent := range item.Revision.Parents {
