@@ -60,9 +60,19 @@ func TestRequirementDetailUsesFields(t *testing.T) {
 func TestTraceUsesTreeBranches(t *testing.T) {
 	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
 	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}
-	data, _ := json.Marshal([]domain.Requirement{root, child})
+	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root, child}})
 	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/BR-TEST-001", data) })
 	if !strings.Contains(output, "└── STR-TEST-001@1") {
 		t.Fatalf("trace does not contain a tree branch: %s", output)
+	}
+}
+
+func TestTraceShowsLinkedTask(t *testing.T) {
+	root := domain.Requirement{ID: "SWR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Calculate"}}
+	task := domain.Task{ID: "T-1", Title: "Implement calculation", State: "open", Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-TEST-001@1", Purpose: "implement"}}}
+	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root}, Tasks: []domain.Task{task}})
+	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/SWR-TEST-001", data) })
+	if !strings.Contains(output, "└── T-1") {
+		t.Fatalf("trace does not contain its linked task: %s", output)
 	}
 }

@@ -169,17 +169,41 @@ func (service Service) ConfirmRequirement(ctx context.Context, ref domain.Requir
 	}
 	return item, err
 }
-func (service Service) Trace(ctx context.Context, root, actor string) ([]domain.Requirement, error) {
+func (service Service) Trace(ctx context.Context, root, actor string) (domain.RequirementGraph, error) {
 	if err := service.authorize(ctx, actor, "requirement.read", root); err != nil {
-		return nil, err
+		return domain.RequirementGraph{}, err
 	}
-	return service.Store.Trace(ctx, root)
+	return service.graph(ctx, root, actor, false)
 }
-func (service Service) Impact(ctx context.Context, root, actor string) ([]domain.Requirement, error) {
+func (service Service) Impact(ctx context.Context, root, actor string) (domain.RequirementGraph, error) {
 	if err := service.authorize(ctx, actor, "requirement.read", root); err != nil {
-		return nil, err
+		return domain.RequirementGraph{}, err
 	}
-	return service.Store.Impact(ctx, root)
+	return service.graph(ctx, root, actor, true)
+}
+func (service Service) graph(ctx context.Context, root, actor string, impact bool) (domain.RequirementGraph, error) {
+	var requirements []domain.Requirement
+	var err error
+	if impact {
+		requirements, err = service.Store.Impact(ctx, root)
+	} else {
+		requirements, err = service.Store.Trace(ctx, root)
+	}
+	if err != nil {
+		return domain.RequirementGraph{}, err
+	}
+	if err := service.authorize(ctx, actor, "task.read", ""); err != nil {
+		return domain.RequirementGraph{}, err
+	}
+	refs := make([]domain.RequirementRef, 0, len(requirements))
+	for _, item := range requirements {
+		refs = append(refs, domain.RequirementRef{ID: item.ID, Revision: item.Revision.Revision})
+	}
+	tasks, err := service.Store.TasksForRequirements(ctx, refs)
+	if err != nil {
+		return domain.RequirementGraph{}, err
+	}
+	return domain.RequirementGraph{Requirements: requirements, Tasks: tasks}, nil
 }
 func (service Service) CreateTask(ctx context.Context, input domain.TaskInput, actor string) (domain.Task, error) {
 	if err := service.authorize(ctx, actor, "task.create", input.ID); err != nil {

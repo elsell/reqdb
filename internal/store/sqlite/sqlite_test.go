@@ -63,6 +63,13 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 	if _, err := store.CreateTask(ctx, taskInput, "tester"); err != nil {
 		t.Fatal(err)
 	}
+	linkedTasks, err := store.TasksForRequirements(ctx, []domain.RequirementRef{{ID: "SWR-TEST-001", Revision: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linkedTasks) != 1 || linkedTasks[0].ID != "T-1" {
+		t.Fatalf("unexpected linked tasks: %+v", linkedTasks)
+	}
 	lease, err := store.LeaseTask(ctx, "T-1", "agent-1", time.Minute, "tester")
 	if err != nil {
 		t.Fatal(err)

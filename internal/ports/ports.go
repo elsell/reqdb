@@ -35,6 +35,7 @@ type Store interface {
 	ConfirmRequirement(context.Context, domain.RequirementRef, string, string, string) (domain.Requirement, error)
 	Trace(context.Context, string) ([]domain.Requirement, error)
 	Impact(context.Context, string) ([]domain.Requirement, error)
+	TasksForRequirements(context.Context, []domain.RequirementRef) ([]domain.Task, error)
 	CreateTask(context.Context, domain.TaskInput, string) (domain.Task, error)
 	GetTask(context.Context, string) (domain.Task, error)
 	ListTasks(context.Context, string, int, bool) (domain.Page[domain.Task], error)

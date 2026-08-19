@@ -49,7 +49,7 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 	case len(parts) >= 2 && parts[1] == "trace":
 		return printRequirementTree(data)
 	case len(parts) >= 2 && parts[1] == "impact":
-		return printRequirementList(data)
+		return printImpact(data)
 	default:
 		return fmt.Errorf("no human output format for %s %s", method, parsed.Path)
 	}
@@ -93,10 +93,11 @@ func printRequirement(data json.RawMessage) error {
 }
 
 func printRequirementTree(data json.RawMessage) error {
-	var items []domain.Requirement
-	if err := json.Unmarshal(data, &items); err != nil {
+	var graph domain.RequirementGraph
+	if err := json.Unmarshal(data, &graph); err != nil {
 		return err
 	}
+	items := graph.Requirements
 	if len(items) == 0 {
 		fmt.Println("No requirements found.")
 		return nil
@@ -122,6 +123,15 @@ func printRequirementTree(data json.RawMessage) error {
 	for id := range children {
 		less(children[id])
 	}
+	tasks := make(map[string][]domain.Task)
+	for _, task := range graph.Tasks {
+		for _, link := range task.Requirements {
+			tasks[link.Requirement] = append(tasks[link.Requirement], task)
+		}
+	}
+	for ref := range tasks {
+		sort.Slice(tasks[ref], func(i, j int) bool { return tasks[ref][i].ID < tasks[ref][j].ID })
+	}
 	roots := make([]domain.Requirement, 0)
 	for _, item := range items {
 		if rootIDs[item.ID] {
@@ -132,12 +142,12 @@ func printRequirementTree(data json.RawMessage) error {
 	table := newTable()
 	fmt.Fprintln(table, "REQUIREMENT\tLEVEL\tSTATE\tTITLE")
 	for _, root := range roots {
-		printTreeNode(table, root, "", true, true, children, map[string]bool{})
+		printTreeNode(table, root, "", true, true, children, tasks, map[string]bool{})
 	}
 	return table.Flush()
 }
 
-func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, path map[string]bool) {
+func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, tasks map[string][]domain.Task, path map[string]bool) {
 	branch := ""
 	if root {
 		branch = "● "
@@ -165,10 +175,34 @@ func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix str
 			nextPrefix += "│   "
 		}
 	}
-	items := children[item.ID]
-	for index, child := range items {
-		printTreeNode(writer, child, nextPrefix, index == len(items)-1, false, children, nextPath)
+	requirementChildren := children[item.ID]
+	taskChildren := tasks[fmt.Sprintf("%s@%d", item.ID, item.Revision.Revision)]
+	for index, child := range requirementChildren {
+		isLast := index == len(requirementChildren)-1 && len(taskChildren) == 0
+		printTreeNode(writer, child, nextPrefix, isLast, false, children, tasks, nextPath)
 	}
+	for index, task := range taskChildren {
+		branch := "├── "
+		if index == len(taskChildren)-1 {
+			branch = "└── "
+		}
+		fmt.Fprintf(writer, "%s%s%s\ttask\t%s\t%s\n", nextPrefix, branch, task.ID, task.State, task.Title)
+	}
+}
+
+func printImpact(data json.RawMessage) error {
+	var graph domain.RequirementGraph
+	if err := json.Unmarshal(data, &graph); err != nil {
+		return err
+	}
+	fmt.Println("Affected requirements:")
+	requirements, _ := json.Marshal(graph.Requirements)
+	if err := printRequirementList(requirements); err != nil {
+		return err
+	}
+	fmt.Println("\nAffected tasks:")
+	tasks, _ := json.Marshal(graph.Tasks)
+	return printTaskList(tasks)
 }
 
 func printTaskList(data json.RawMessage) error {

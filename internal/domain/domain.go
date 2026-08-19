@@ -193,6 +193,11 @@ type Page[T any] struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
+type RequirementGraph struct {
+	Requirements []Requirement `json:"requirements"`
+	Tasks        []Task        `json:"tasks"`
+}
+
 type Identity struct {
 	ActorID string
 }

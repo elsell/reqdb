@@ -357,6 +357,33 @@ JOIN d ON r.parent_id=d.id
 	return items, nil
 }
 
+func (store *Store) TasksForRequirements(ctx context.Context, refs []domain.RequirementRef) ([]domain.Task, error) {
+	ids := make(map[string]bool)
+	for _, ref := range refs {
+		var taskIDs []string
+		if err := store.db.WithContext(ctx).Model(&taskRequirementRow{}).Where("requirement_id=? AND requirement_revision=?", ref.ID, ref.Revision).Pluck("task_id", &taskIDs).Error; err != nil {
+			return nil, err
+		}
+		for _, id := range taskIDs {
+			ids[id] = true
+		}
+	}
+	ordered := make([]string, 0, len(ids))
+	for id := range ids {
+		ordered = append(ordered, id)
+	}
+	sort.Strings(ordered)
+	tasks := make([]domain.Task, 0, len(ordered))
+	for _, id := range ordered {
+		task, err := store.GetTask(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
 func (store *Store) CreateTask(ctx context.Context, input domain.TaskInput, actor string) (domain.Task, error) {
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		stamp := now()

@@ -358,24 +358,24 @@ func (api API) trace(w http.ResponseWriter, r *http.Request, parts []string) {
 	if len(parts) > 0 {
 		root = parts[0]
 	}
-	items, err := api.Service.Trace(r.Context(), root, actor(r))
+	graph, err := api.Service.Trace(r.Context(), root, actor(r))
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	write(w, r, 200, items, "")
+	write(w, r, 200, graph, "")
 }
 func (api API) impact(w http.ResponseWriter, r *http.Request, parts []string) {
 	if len(parts) != 1 {
 		fail(w, r, errors.New("requirement ID is required"))
 		return
 	}
-	items, err := api.Service.Impact(r.Context(), parts[0], actor(r))
+	graph, err := api.Service.Impact(r.Context(), parts[0], actor(r))
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	write(w, r, 200, items, "")
+	write(w, r, 200, graph, "")
 }
 func (api API) audit(w http.ResponseWriter, r *http.Request) {
 	page, err := api.Service.ListAudit(r.Context(), r.URL.Query().Get("entity"), r.URL.Query().Get("cursor"), limit(r), actor(r))
@@ -386,12 +386,12 @@ func (api API) audit(w http.ResponseWriter, r *http.Request) {
 	write(w, r, 200, page.Items, page.NextCursor)
 }
 func (api API) render(w http.ResponseWriter, r *http.Request) {
-	items, err := api.Service.Trace(r.Context(), r.URL.Query().Get("root"), actor(r))
+	graph, err := api.Service.Trace(r.Context(), r.URL.Query().Get("root"), actor(r))
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
-	write(w, r, http.StatusOK, application.Render(items), "")
+	write(w, r, http.StatusOK, application.Render(graph.Requirements), "")
 }
 
 func ParsePullRequest(raw string) (domain.PullRequest, error) {
