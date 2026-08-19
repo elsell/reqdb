@@ -52,8 +52,8 @@ button:disabled { opacity: .55; }
 .pane-count::after { content: ")"; }
 .tree { flex: 1; min-height: 0; padding: 3px 4px 8px; overflow: auto; white-space: nowrap; }
 .loading, .empty { padding: 7px; color: var(--muted); }
-.tree-node { position: relative; min-width: 820px; }
-.tree-header, .tree-row { display: grid; grid-template-columns: minmax(300px, 1fr) 88px 160px 82px 34px; min-width: 820px; }
+.tree-node { position: relative; min-width: 780px; }
+.tree-header, .tree-row { display: grid; grid-template-columns: minmax(300px, 1fr) 88px 160px 82px; min-width: 780px; }
 .tree-header { position: sticky; z-index: 3; top: -3px; height: 22px; align-items: center; color: #263442; background: linear-gradient(#f8f9fa, #dce2e8); border-bottom: 1px solid #8996a5; font-weight: 700; }
 .tree-header-cell { height: 100%; display: flex; align-items: center; padding: 0 5px; border-right: 1px solid #aeb6bf; }
 .column-help { position: relative; width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; margin-left: 3px; color: #42566b; cursor: help; }
@@ -72,7 +72,6 @@ button:disabled { opacity: .55; }
 .tree-primary { min-width: 0; height: 100%; display: flex; align-items: center; padding: 1px 4px 1px calc(4px + var(--depth, 0) * 18px); overflow: hidden; }
 .tree-attribute { min-width: 0; height: 100%; display: flex; align-items: center; padding: 1px 4px; overflow: hidden; border-left: 1px solid #e1e5e9; }
 .tree-attribute.muted { color: #8a939d; }
-.tree-action { justify-content: center; overflow: visible; }
 .lease-mark { margin-left: 4px; color: var(--blue-dark); }
 .twisty { width: 13px; height: 13px; flex: none; margin: 0 4px 0 0; border: 1px solid #707982; padding: 0; background: #fff; font: 11px/10px Arial, sans-serif; text-align: center; }
 .twisty:hover { background: #e8f2fc; }
@@ -101,13 +100,6 @@ button:disabled { opacity: .55; }
 .status-chip.retired, .status-chip.closed { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }
 .tree-row.selected .status-chip { color: #fff; background: rgb(255 255 255 / 14%); border-color: rgb(255 255 255 / 65%); }
 .tree-row.selected .item-icon { color: #fff; fill: none; }
-.actions { opacity: 0; pointer-events: none; }
-.tree-row:hover .actions, .tree-row.selected .actions, .tree-row:focus-within .actions { opacity: 1; pointer-events: auto; }
-.actions-toggle { width: 24px; height: 18px; justify-content: center; border: 1px solid #8c959e; padding: 0; color: #253444; background: linear-gradient(#fff, #e1e5e9); cursor: pointer; font-size: 11px; line-height: 14px; }
-.actions-toggle span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.actions-menu { position: fixed; z-index: 1000; min-width: 155px; border: 1px solid #66717c; padding: 2px; background: #fff; box-shadow: 1px 2px 4px rgb(0 0 0 / 25%); }
-.action-item { width: 100%; height: 21px; border: 0; padding: 2px 7px; background: #fff; text-align: left; white-space: nowrap; }
-.action-item:hover { color: #fff; background: #316ac5; }
 .details { flex: 1; min-height: 0; overflow: auto; padding: 7px; white-space: normal; }
 .details.empty { color: var(--muted); }
 .detail-title { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; font-size: 14px; }
@@ -131,6 +123,8 @@ button:disabled { opacity: .55; }
 .lease-header { position: sticky; z-index: 2; top: 0; height: 21px; align-items: center; background: linear-gradient(#f7f8f9, #dce0e4); border-bottom: 1px solid var(--line); font-weight: 700; }
 .lease-row { min-height: 22px; align-items: center; border-bottom: 1px solid #d8dde2; }
 .lease-row:hover { background: var(--select); }
+.lease-row.clickable { cursor: pointer; }
+.lease-row.clickable:focus { outline: 1px dotted #1b3f68; outline-offset: -1px; }
 .lease-row.expiring { background: #fff8e1; }
 .lease-cell { min-width: 0; height: 100%; padding: 3px 5px; overflow: hidden; border-right: 1px solid #c2c8cf; text-overflow: ellipsis; white-space: nowrap; }
 .lease-id, .lease-task { font-family: Consolas, "Liberation Mono", monospace; }
@@ -148,9 +142,13 @@ button:disabled { opacity: .55; }
 .event-kind { font-weight: 700; }
 .event-entity, .event-correlation { font-family: Consolas, "Liberation Mono", monospace; }
 .summary { min-height: 22px; flex: none; display: flex; align-items: center; padding: 0 5px; background: var(--chrome); border-top: 1px solid var(--line); }
-.summary-item { display: inline-flex; align-items: center; gap: 3px; padding: 0 9px; border-right: 1px solid #aeb5bd; color: var(--muted); }
+.summary-item { height: 21px; display: inline-flex; align-items: center; gap: 3px; padding: 0 9px; border: 0; border-right: 1px solid #aeb5bd; color: var(--muted); background: transparent; }
 .summary-item:first-child { padding-left: 0; }
 .summary-item strong { color: var(--ink); }
+.summary-filter:hover { color: var(--ink); background: #d9e9fb; }
+.summary-filter.selected { color: #fff; background: var(--blue-dark); }
+.summary-filter.selected strong { color: #fff; }
+.summary-filter:focus { position: relative; outline: 1px dotted #1b3f68; outline-offset: -2px; }
 
 @media (max-width: 720px) {
   .toolbar button:not(#refresh) { display: none; }

@@ -1,7 +1,7 @@
 "use strict";
 
 const state = {
-  requirements: [], tasks: [], leases: [], events: [], filter: "", refreshTimer: 0, selected: null,
+  requirements: [], tasks: [], leases: [], events: [], filter: "", statusFilter: "", refreshTimer: 0, selected: null, initialized: false,
   collapsed: new Set(), collapsedGroups: new Set(), details: new Map(),
 };
 const elements = {
@@ -16,7 +16,6 @@ const elements = {
 };
 let describeRequirement;
 let describeTask;
-let openMenu;
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -109,6 +108,11 @@ async function refresh() {
   elements.refresh.disabled = true;
   try {
     [state.requirements, state.tasks, state.leases] = await Promise.all([fetchAll("/v1/requirements"), fetchAll("/v1/tasks"), fetchAll("/v1/leases")]);
+    if (!state.initialized) {
+      state.collapsed = new Set(state.requirements.map(item => `requirement:${item.id}`));
+      state.collapsedGroups.delete("requirements");
+      state.initialized = true;
+    }
     state.details.clear();
     elements.error.hidden = true;
     render();
@@ -141,6 +145,22 @@ function scheduleRefresh() {
 
 function matches(values) { return !state.filter || values.join(" ").toLowerCase().includes(state.filter); }
 
+function statusMatches(type, item) {
+  switch (state.statusFilter) {
+  case "requirements": return type === "requirement";
+  case "implemented": return type === "requirement" && item.reconciliation_state === "implemented";
+  case "retired": return type === "requirement" && item.lifecycle_state === "retired";
+  case "needs_reconciliation": return type === "requirement" && item.reconciliation_state === "needs_reconciliation";
+  case "open_tasks": return type === "task" && item.state === "open";
+  case "complete_tasks": return type === "task" && item.state === "complete";
+  case "active_leases": return type === "task" && state.leases.some(lease => lease.task_id === item.id);
+  default: return true;
+  }
+}
+
+function itemMatches(type, item, values) { return matches(values) && statusMatches(type, item); }
+function filterActive() { return Boolean(state.filter || state.statusFilter); }
+
 async function mutate(path, body) {
   try {
     const response = await fetch(path, {
@@ -157,44 +177,6 @@ async function mutate(path, body) {
 
 function copy(value) {
   navigator.clipboard.writeText(value).catch(() => window.prompt("Copy this value:", value));
-}
-
-function actionsMenu(actions) {
-  const menu = element("span", "actions");
-  const toggle = element("button", "actions-toggle");
-  toggle.append(icon("more"), "Actions");
-  toggle.type = "button";
-  toggle.title = "Item actions";
-  toggle.addEventListener("click", event => {
-    event.stopPropagation();
-    showActions(toggle, actions);
-  });
-  menu.append(toggle);
-  return menu;
-}
-
-function closeActions() {
-  if (openMenu) openMenu.remove();
-  openMenu = null;
-}
-
-function showActions(anchor, actions) {
-  closeActions();
-  const list = element("div", "actions-menu");
-  for (const action of actions) {
-    const control = element("button", "action-item");
-    control.append(icon(actionIcon(action.label)), element("span", "", action.label));
-    control.type = "button";
-    control.addEventListener("click", event => { event.stopPropagation(); closeActions(); action.run(); });
-    list.append(control);
-  }
-  document.body.append(list);
-  const bounds = anchor.getBoundingClientRect();
-  const left = Math.max(3, Math.min(bounds.left, window.innerWidth - list.offsetWidth - 3));
-  const below = bounds.bottom + list.offsetHeight <= window.innerHeight;
-  list.style.left = `${left}px`;
-  list.style.top = `${below ? bounds.bottom : Math.max(3, bounds.top - list.offsetHeight)}px`;
-  openMenu = list;
 }
 
 function graph(items, parentIDs, order) {
@@ -245,9 +227,7 @@ function nodeRow({ id, title, lifecycleValue, leaseLabel, ready, stateValue, sta
   const readiness = element("div", `tree-attribute${group ? " muted" : ""}`);
   if (group) readiness.textContent = "—";
   else readiness.append(ready ? statusChip("ready", "Yes") : statusChip("open", "No"));
-  const actionCell = element("div", "tree-attribute tree-action");
-  if (actions?.length) actionCell.append(actionsMenu(actions));
-  row.append(primary, lifecycle, workState, readiness, actionCell);
+  row.append(primary, lifecycle, workState, readiness);
   if (select) {
     row.classList.add("clickable");
     row.tabIndex = 0;
@@ -274,7 +254,7 @@ function renderBranch(item, children, values, describe, type, depth) {
   if (!hasMatch(item, children, values)) return null;
   const descendants = children.get(item.id) || [];
   const key = `${type}:${item.id}`;
-  const collapsed = state.collapsed.has(key) && !state.filter;
+  const collapsed = state.collapsed.has(key) && !filterActive();
   const wrapper = element("div", "tree-node");
   const details = describe(item);
   wrapper.append(nodeRow({
@@ -296,7 +276,7 @@ function renderBranch(item, children, values, describe, type, depth) {
 }
 
 function groupNode(key, title, count, roots, children, values, describe, type, renderNode) {
-  const collapsed = state.collapsedGroups.has(key) && !state.filter;
+  const collapsed = state.collapsedGroups.has(key) && !filterActive();
   const wrapper = element("div", "tree-node");
   const complete = type === "requirement"
     ? state.requirements.filter(item => item.reconciliation_state === "implemented").length
@@ -330,7 +310,6 @@ function renderExplorer() {
     headerCell("Lifecycle", "Shows whether the item is active or retired."),
     headerCell("Work state", "Shows the requirement reconciliation state or the task progress state."),
     headerCell("Ready", "Shows whether the item meets all rules that permit new work. Open the item to see blockers."),
-    headerCell(""),
   );
   elements.explorer.append(header);
   const requirementOrder = (left, right) => left.id.localeCompare(right.id);
@@ -425,12 +404,12 @@ function renderExplorer() {
   for (const linkedTasks of tasksByRequirement.values()) linkedTasks.sort(taskOrder);
 
   const requirementHasMatch = item => {
-    if (matches(requirementValues(item))) return true;
-    if ((tasksByRequirement.get(item.id) || []).some(task => matches(taskValues(task)))) return true;
+    if (itemMatches("requirement", item, requirementValues(item))) return true;
+    if ((tasksByRequirement.get(item.id) || []).some(task => itemMatches("task", task, taskValues(task)))) return true;
     return (requirements.children.get(item.id) || []).some(requirementHasMatch);
   };
   const renderTaskLeaf = (item, depth) => {
-    if (!matches(taskValues(item))) return null;
+    if (!itemMatches("task", item, taskValues(item))) return null;
     const wrapper = element("div", "tree-node");
     wrapper.append(nodeRow({
       ...describeTask(item), type: "task", depth, hasChildren: false,
@@ -442,10 +421,10 @@ function renderExplorer() {
   const renderRequirementBranch = (item, depth) => {
     if (!requirementHasMatch(item)) return null;
     const requirementChildren = (requirements.children.get(item.id) || []).filter(requirementHasMatch);
-    const taskChildren = (tasksByRequirement.get(item.id) || []).filter(task => matches(taskValues(task)));
+    const taskChildren = (tasksByRequirement.get(item.id) || []).filter(task => itemMatches("task", task, taskValues(task)));
     const hasChildren = requirementChildren.length > 0 || taskChildren.length > 0;
     const key = `requirement:${item.id}`;
-    const collapsed = state.collapsed.has(key) && !state.filter;
+    const collapsed = state.collapsed.has(key) && !filterActive();
     const wrapper = element("div", "tree-node");
     wrapper.append(nodeRow({
       ...describeRequirement(item), type: "requirement", depth, hasChildren, collapsed,
@@ -586,6 +565,26 @@ function remainingTime(value) {
   return `${hours}h ${minutes % 60}m left`;
 }
 
+function selectTaskInTree(taskID) {
+  const task = state.tasks.find(item => item.id === taskID);
+  if (!task) return;
+  const requirementsByID = new Map(state.requirements.map(item => [item.id, item]));
+  const expanded = new Set();
+  const expand = requirementID => {
+    if (expanded.has(requirementID)) return;
+    expanded.add(requirementID);
+    state.collapsed.delete(`requirement:${requirementID}`);
+    const requirement = requirementsByID.get(requirementID);
+    for (const parent of requirement?.revision.parents || []) expand(parent.id);
+  };
+  for (const link of task.requirements || []) expand(link.requirement.split("@", 1)[0]);
+  state.collapsedGroups.delete("requirements");
+  state.selected = { type: "task", id: taskID };
+  render();
+  loadDetail("task", taskID);
+  window.requestAnimationFrame(() => elements.explorer.querySelector(".tree-row.selected")?.scrollIntoView({ block: "nearest" }));
+}
+
 function renderLeases() {
   elements.leases.replaceChildren();
   elements.leases.className = "lease-list";
@@ -601,6 +600,14 @@ function renderLeases() {
   for (const lease of state.leases) {
     const expiring = new Date(lease.expires_at).getTime() - Date.now() < 5 * 60000;
     const row = element("div", `lease-row${expiring ? " expiring" : ""}`);
+    row.classList.add("clickable");
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-label", `Show task ${lease.task_id}`);
+    row.addEventListener("click", event => { if (!event.target.closest("button")) selectTaskInTree(lease.task_id); });
+    row.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectTaskInTree(lease.task_id); }
+    });
     const leaseID = leaseCell("lease-id");
     leaseID.append(icon("lease", "status-icon"), element("span", "", lease.lease_id));
     const expiry = leaseCell(`lease-expiry${expiring ? " expiring" : ""}`);
@@ -662,17 +669,25 @@ function renderEvents() {
 
 function renderSummary() {
   const values = [
-    [state.requirements.length, "requirements", "requirement"],
-    [state.requirements.filter(item => item.reconciliation_state === "implemented").length, "implemented", "check"],
-    [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired", "retired"],
-    [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation", "warning"],
-    [state.tasks.filter(item => item.state === "open").length, "open tasks", "pending"],
-    [state.tasks.filter(item => item.state === "complete").length, "complete tasks", "check"],
-    [state.leases.length, "active leases", "lease"],
+    [state.requirements.length, "requirements", "requirement", "requirements"],
+    [state.requirements.filter(item => item.reconciliation_state === "implemented").length, "implemented", "check", "implemented"],
+    [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired", "retired", "retired"],
+    [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation", "warning", "needs_reconciliation"],
+    [state.tasks.filter(item => item.state === "open").length, "open tasks", "pending", "open_tasks"],
+    [state.tasks.filter(item => item.state === "complete").length, "complete tasks", "check", "complete_tasks"],
+    [state.leases.length, "active leases", "lease", "active_leases"],
   ];
-  elements.summary.replaceChildren(...values.map(([value, label, iconName]) => {
-    const item = element("span", "summary-item");
+  elements.summary.replaceChildren(...values.map(([value, label, iconName, filter]) => {
+    const item = element("button", `summary-item summary-filter${state.statusFilter === filter ? " selected" : ""}`);
+    item.type = "button";
+    item.setAttribute("aria-pressed", String(state.statusFilter === filter));
+    item.title = `Filter by ${label}`;
     item.append(icon(iconName, "status-icon"), element("strong", "", String(value)), ` ${label}`);
+    item.addEventListener("click", () => {
+      state.statusFilter = state.statusFilter === filter ? "" : filter;
+      renderExplorer();
+      renderSummary();
+    });
     return item;
   }));
 }
@@ -754,7 +769,4 @@ elements.collapseAll.addEventListener("click", () => {
   state.collapsed = new Set(state.requirements.map(item => `requirement:${item.id}`));
   render();
 });
-document.addEventListener("click", closeActions);
-window.addEventListener("resize", closeActions);
-elements.explorer.addEventListener("scroll", closeActions);
 refresh(); connect();

@@ -37,7 +37,7 @@ func TestEmbeddedUI(t *testing.T) {
 	if response.StatusCode != http.StatusOK || !strings.Contains(script, `new EventSource("/v1/events")`) {
 		t.Fatalf("script response: status=%d body=%q", response.StatusCode, body)
 	}
-	for _, expected := range []string{"tasksByRequirement", "renderEvents", "state.events.unshift"} {
+	for _, expected := range []string{"tasksByRequirement", "renderEvents", "state.events.unshift", "selectTaskInTree", "state.collapsed = new Set", "statusMatches", "aria-pressed"} {
 		if !strings.Contains(script, expected) {
 			t.Errorf("script does not contain %q", expected)
 		}
