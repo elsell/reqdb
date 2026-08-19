@@ -134,6 +134,7 @@ func serve(args []string) error {
 	mux.Handle("/", webui.Handler())
 	handler := mux
 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server.RegisterOnShutdown(broker.Close)
 	prune := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -159,6 +160,7 @@ func serve(args []string) error {
 	go func() { logger.Info("server started", "address", *listen); errorsChannel <- server.ListenAndServe() }()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
 	select {
 	case <-signals:
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
