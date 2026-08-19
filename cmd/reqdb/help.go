@@ -1,0 +1,273 @@
+package main
+
+import "fmt"
+
+const rootHelp = `reqdb tracks requirements and their implementation in code.
+
+Usage:
+  reqdb [global options] COMMAND [arguments] [options]
+
+Core Commands:
+  requirement   Manage requirements and reconciliation
+  task          Manage implementation tasks
+  lease         Maintain active task leases
+
+Graph Commands:
+  trace         Show a requirement hierarchy
+  impact        Show requirements and tasks affected by a change
+  render        Render requirements as Markdown
+
+Other Commands:
+  audit         List audit events
+  serve         Start the API server
+  help          Show help for a command
+
+Global Options:
+  --server URL  API server URL (default "http://127.0.0.1:8080")
+  --actor ID    Actor ID for the audit log (default "anonymous")
+  --json        Print the API response as JSON
+  -h, --help    Show help
+
+Use "reqdb COMMAND --help" for more information about a command.
+`
+
+const requirementHelp = `Manage requirements and their reconciliation with code.
+
+Usage:
+  reqdb requirement ACTION [arguments] [options]
+
+Actions:
+  list       List requirements
+  get        Show one requirement revision
+  check      Validate a requirement file
+  create     Create a requirement
+  update     Create a requirement revision
+  confirm    Confirm that code matches a requirement revision
+  render     Render a requirement and its descendants
+
+Use "reqdb requirement ACTION --help" for action options.
+`
+
+const taskHelp = `Manage tasks that implement or reconcile requirements.
+
+Usage:
+  reqdb task ACTION [arguments] [options]
+
+Actions:
+  list       List tasks
+  ready      List tasks that are ready for work
+  get        Show one task
+  create     Create a task from a file
+  lease      Lease a task to an agent
+  complete   Complete a leased task
+  link-pr    Link a pull request to a task
+
+Use "reqdb task ACTION --help" for action options.
+`
+
+const leaseHelp = `Maintain a task lease.
+
+Usage:
+  reqdb lease ACTION LEASE [options]
+
+Actions:
+  heartbeat   Extend a lease
+  release     Release a lease
+
+Use "reqdb lease ACTION --help" for action options.
+`
+
+const serveHelp = `Start the reqdb API server.
+
+Usage:
+  reqdb serve [options]
+
+Options:
+  --db PATH                     SQLite database path (default "reqdb.sqlite")
+  --listen ADDRESS              Listen address (default "127.0.0.1:8080")
+  --audit-retention-days DAYS   Audit retention period (default 90)
+  -h, --help                    Show help
+
+Example:
+  reqdb serve --db reqdb.sqlite --listen 127.0.0.1:8080
+`
+
+const clientOptionsHelp = `
+Global Options:
+  --server URL   API server URL (default "http://127.0.0.1:8080")
+  --actor ID     Actor ID for the audit log (default "anonymous")
+  --json         Print the API response as JSON
+  -h, --help     Show help
+`
+
+var actionHelp = map[string]string{
+	"requirement list": `List requirements.
+
+Usage:
+  reqdb requirement list [options]
+
+Options:
+  --cursor ID       Continue after a requirement ID
+  --level LEVEL     Filter by business, stakeholder, system, or software
+  --state STATE     Filter by reconciliation state
+  --json            Print the API response as JSON
+`,
+	"requirement get": `Show one requirement revision.
+
+Usage:
+  reqdb requirement get ID[@REVISION] [options]
+`,
+	"requirement check": `Validate a requirement file without a database change.
+
+Usage:
+  reqdb requirement check --from-file FILE [options]
+`,
+	"requirement create": `Create a requirement from a YAML file.
+
+Usage:
+  reqdb requirement create --from-file FILE [options]
+`,
+	"requirement update": `Create the next requirement revision.
+
+Usage:
+  reqdb requirement update ID --from-file FILE --expected REVISION [options]
+`,
+	"requirement confirm": `Confirm that code matches a requirement revision.
+
+Usage:
+  reqdb requirement confirm ID[@REVISION] --commit SHA [options]
+
+Options:
+  --result RESULT   code_changed or existing_code_confirmed
+`,
+	"requirement render": `Render a requirement and its descendants as Markdown.
+
+Usage:
+  reqdb requirement render ID [options]
+`,
+	"task list": `List tasks.
+
+Usage:
+  reqdb task list [--cursor ID] [options]
+`,
+	"task ready": `List tasks that are ready for work.
+
+Usage:
+  reqdb task ready [--cursor ID] [options]
+`,
+	"task get": `Show one task.
+
+Usage:
+  reqdb task get ID [options]
+`,
+	"task create": `Create a task from a YAML file.
+
+Usage:
+  reqdb task create --from-file FILE [options]
+`,
+	"task lease": `Lease a ready task to an agent.
+
+Usage:
+  reqdb task lease ID --agent AGENT [--ttl DURATION] [options]
+`,
+	"task complete": `Complete a leased task at a Git commit.
+
+Usage:
+  reqdb task complete ID --lease LEASE --fence NUMBER --commit SHA [options]
+`,
+	"task link-pr": `Link a GitHub pull request to a task.
+
+Usage:
+  reqdb task link-pr ID --url URL [options]
+`,
+	"lease heartbeat": `Extend an active lease.
+
+Usage:
+  reqdb lease heartbeat LEASE --fence NUMBER [--ttl DURATION] [options]
+`,
+	"lease release": `Release an active lease.
+
+Usage:
+  reqdb lease release LEASE --fence NUMBER [options]
+`,
+	"trace": `Show the requirement hierarchy.
+
+Usage:
+  reqdb trace [REQUIREMENT] [options]
+`,
+	"impact": `Show requirements and tasks affected by a change.
+
+Usage:
+  reqdb impact REQUIREMENT [options]
+`,
+	"audit": `List audit events.
+
+Usage:
+  reqdb audit [TYPE:ID] [options]
+`,
+	"render": `Render requirements as Markdown.
+
+Usage:
+  reqdb render [--root REQUIREMENT] [options]
+`,
+}
+
+type commandError struct {
+	message string
+	help    string
+}
+
+func (err commandError) Error() string {
+	return fmt.Sprintf("%s\n\n%s", err.message, err.help)
+}
+
+func withHelp(message, help string) error {
+	if help != rootHelp && help != serveHelp {
+		help += clientOptionsHelp
+	}
+	return commandError{message: message, help: help}
+}
+
+func helpFor(args []string) string {
+	if len(args) == 0 {
+		return rootHelp
+	}
+	if len(args) >= 2 {
+		if help, ok := actionHelp[args[0]+" "+args[1]]; ok {
+			return help
+		}
+	}
+	switch args[0] {
+	case "requirement":
+		return requirementHelp
+	case "task":
+		return taskHelp
+	case "lease":
+		return leaseHelp
+	case "serve":
+		return serveHelp
+	default:
+		if help, ok := actionHelp[args[0]]; ok {
+			return help
+		}
+		return rootHelp
+	}
+}
+
+func isHelpRequest(args []string) bool {
+	if len(args) == 0 || args[0] == "help" {
+		return true
+	}
+	if len(args) == 1 && (args[0] == "requirement" || args[0] == "task" || args[0] == "lease") {
+		return true
+	}
+	return has(args, "-h") || has(args, "--help")
+}
+
+func printHelp(args []string) {
+	help := helpFor(args)
+	fmt.Print(help)
+	if help != rootHelp && help != serveHelp {
+		fmt.Print(clientOptionsHelp)
+	}
+}

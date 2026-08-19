@@ -95,8 +95,9 @@ pull requests. A pull request can link to more than one task.
 ## Audit
 
 Each successful state change shall append an audit event in the same
-transaction. An audit event shall identify the time, actor, kind, entity, and
-event data. It shall not be updated or deleted.
+transaction. An audit event shall identify the time, actor, request IDs, kind,
+entity, and event data. It shall not be updated. The server shall delete audit
+events that exceed its configured retention period.
 
 ## Input
 

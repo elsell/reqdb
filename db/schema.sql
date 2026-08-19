@@ -1,6 +1,4 @@
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 1;
-
 CREATE TABLE requirement (
     id TEXT PRIMARY KEY,
     current_revision INTEGER NOT NULL CHECK (current_revision > 0),
@@ -191,6 +189,8 @@ CREATE TABLE audit_event (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     occurred_at TEXT NOT NULL,
     actor_id TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    causation_id TEXT NOT NULL,
     kind TEXT NOT NULL,
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,
@@ -202,12 +202,6 @@ CREATE INDEX audit_event_entity
 
 CREATE TRIGGER audit_event_no_update
 BEFORE UPDATE ON audit_event
-BEGIN
-    SELECT RAISE(ABORT, 'audit event is append-only');
-END;
-
-CREATE TRIGGER audit_event_no_delete
-BEFORE DELETE ON audit_event
 BEGIN
     SELECT RAISE(ABORT, 'audit event is append-only');
 END;
