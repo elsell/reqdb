@@ -3,7 +3,6 @@ schema: requirement/v1
 id: STR-SESSION-001
 level: stakeholder
 revision: 1
-status: approved
 title: Define session lifetime
 statement: >-
   The security owner shall define a maximum session lifetime in the approved

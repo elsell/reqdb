@@ -1,16 +1,18 @@
 # reqdb
 
-`reqdb` coordinates requirements and agent work.
+`reqdb` tracks requirements and their implementation in code. It also
+coordinates the tasks that implement or reconcile those requirements.
 
-- SQLite is the system of record.
-- Requirement revisions and audit events are append-only.
-- YAML is input only.
-- One coordinator serves all agents.
-- One CLI checks, traces, renders, and claims work.
+- One server owns a SQLite database.
+- The same binary is the server and its CLI client.
+- Requirements have immutable revisions and a current reconciliation state.
+- Parent changes make all downstream requirements need reconciliation.
+- Tasks have dependencies, leases, requirement links, and pull request links.
+- Rendered documents are derived views for humans and LLMs.
 
-The profile uses BRS, StRS, SyRS, and SRS. It aligns with
-[ISO/IEC/IEEE 29148:2018](https://www.iso.org/standard/72089.html). It does not
-claim conformance.
+The requirement hierarchy uses BRS, StRS, SyRS, and SRS. It aligns with
+[ISO/IEC/IEEE 29148:2018](https://www.iso.org/standard/72089.html), but it does
+not claim conformance.
 
-Version 1 has no automated backup or YAML export. This repository contains the
-design. See [SPEC.md](SPEC.md) and the YAML input [examples](examples).
+This repository contains the version 1 design. See [SPEC.md](SPEC.md), the
+[database schema](db/schema.sql), and the [input examples](examples).

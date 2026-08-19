@@ -8,7 +8,6 @@
     "id",
     "level",
     "revision",
-    "status",
     "title",
     "statement",
     "links"
@@ -23,7 +22,6 @@
       "enum": ["business", "stakeholder", "system", "software"]
     },
     "revision": {"type": "integer", "minimum": 1},
-    "status": {"enum": ["draft", "approved", "retired"]},
     "title": {"type": "string", "minLength": 1},
     "statement": {"type": "string", "minLength": 1},
     "links": {

@@ -3,7 +3,6 @@ schema: requirement/v1
 id: SYR-SESSION-001
 level: system
 revision: 1
-status: approved
 title: Reject expired sessions
 statement: The system shall reject each session after its maximum lifetime.
 links:

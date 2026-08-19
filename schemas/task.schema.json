@@ -9,7 +9,7 @@
     "title",
     "description",
     "priority",
-    "contributes_to",
+    "requirements",
     "depends_on"
   ],
   "properties": {
@@ -18,13 +18,21 @@
     "title": {"type": "string", "minLength": 1},
     "description": {"type": "string", "minLength": 1},
     "priority": {"type": "integer", "minimum": 0, "maximum": 100},
-    "contributes_to": {
+    "requirements": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
       "items": {
-        "type": "string",
-        "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requirement", "purpose"],
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+          },
+          "purpose": {"enum": ["implement", "reconcile"]}
+        }
       }
     },
     "depends_on": {

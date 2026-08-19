@@ -2,230 +2,157 @@
 
 This file is normative. `shall` marks a rule.
 
-## Scope
+## Purpose
 
-`reqdb` shall manage requirements, traceability, tasks, evidence, and leases.
-It shall have no web interface, LLM, plug-in system, or generic workflow
-engine. Version 1 shall not infer requirement fulfillment, run tests, automate
-backups, or export YAML.
+`reqdb` shall track requirements and their implementation in code. It shall
+also coordinate the tasks that implement or reconcile those requirements.
+
+Version 1 shall manage requirements, traceability, reconciliation, tasks,
+leases, pull request links, audit events, and rendered views. It shall not run
+tests, manage development constraints, or manage agent workflows.
 
 ## Authority
 
 - SQLite shall be the system of record.
-- One coordinator shall own the SQLite file on local storage.
-- All clients shall use that coordinator.
-- Clients shall not open the SQLite file through a network file system.
+- One server shall own the SQLite file on local storage.
+- All CLI commands shall use the server.
 - YAML shall be an input format only.
 - Requirement revisions and audit events shall be append-only.
-- Repository policy shall grant approval. `reqdb` shall record it.
+- Rendered files shall not be authoritative.
 
-Generated documents, indexes, and client files shall not be authoritative.
+## Requirement hierarchy
 
-## Objects
-
-| Object | Purpose |
-|---|---|
-| Requirement | Gives one stable identity and its current revision. |
-| Requirement revision | Stores one immutable requirement version. |
-| Task | Defines one work unit. |
-| Evidence | Links source or a test to one requirement revision. |
-| Lease | Gives temporary task control to one agent. |
-| Audit event | Records one state change. |
-
-The database shall store parsed objects as canonical JSON. It shall not retain
-YAML layout, comments, anchors, or aliases.
-
-## Hierarchy
-
-| Level | View | ID prefix | Parent level |
-|---|---|---|---|
-| Business | BRS | `BR-` | None |
-| Stakeholder | StRS | `STR-` | Business |
-| System | SyRS | `SYR-` | Stakeholder |
-| Software | SRS | `SWR-` | System |
+| Level | View | ID prefix | Meaning | Parent |
+|---|---|---|---|---|
+| Business | BRS | `BR-` | A result that the organization wants. | None |
+| Stakeholder | StRS | `STR-` | An outcome that a stakeholder needs. | Business |
+| System | SyRS | `SYR-` | Observable system behavior or a measurable system property. | Stakeholder |
+| Software | SRS | `SWR-` | Software behavior that satisfies a system requirement. | System |
 
 Each non-business requirement shall refine one or more requirements at the
 immediate parent level. Each link shall name a parent revision. The refinement
 graph shall be acyclic.
 
-The profile shall be fixed. The renderer shall produce BRS, StRS, SyRS, and
-SRS views. The profile aligns with ISO/IEC/IEEE 29148:2018. It does not claim
-conformance.
-
-## YAML input
-
-- Input shall use UTF-8 and the YAML 1.2 Core Schema.
-- One input file shall contain one object.
-- Parsers shall reject duplicate keys.
-- Parsers shall reject aliases, anchors, merge keys, and custom tags.
-- Schemas shall reject unknown fields.
-- IDs shall be stable and unique.
-
-`check FILE` shall validate input without changing the database. `apply FILE`
-shall validate and store input.
-
-## Requirements
-
-An approved requirement shall meet these rules:
-
-- Its statement contains one lowercase `shall`.
-- Its statement defines one objectively verifiable obligation.
-- Each parent exists at the pinned revision.
-- Each parent is approved.
-
-Mechanical checks cannot prove meaning. Review shall confirm that each
-requirement is necessary, clear, feasible, and correct.
+An input requirement shall have one objectively verifiable obligation. Its
+statement shall contain one lowercase `shall`.
 
 ## Revisions
 
-A requirement shall start at revision 1. Any stored content change shall
-create the next revision. A revision shall not be updated or deleted.
+A requirement shall have a stable ID and immutable revisions. A content change
+shall create the next revision. The database shall identify one current
+revision.
 
-`apply` shall use an expected current revision. Zero shall mean that the
-requirement must not exist. A mismatch shall fail without a change.
+`apply` shall use the expected current revision. A mismatch shall cause no
+change.
 
-One transaction shall:
+## Reconciliation
 
-1. Check the expected revision.
-2. Insert the new revision.
-3. Set it as current.
-4. Append an audit event.
+Reconciliation describes the relation between a requirement revision and the
+code.
 
-The content hash shall cover the complete parsed object. The tool shall encode
-the object with RFC 8785 and hash it with SHA-256. Hashes shall use lowercase
-hexadecimal.
+| State | Meaning |
+|---|---|
+| `unimplemented` | No accepted implementation exists. |
+| `in_progress` | An active task implements or reconciles the requirement. |
+| `implemented` | A confirmation states that the code matches the requirement revision. |
+| `needs_reconciliation` | The requirement or one of its ancestors changed after confirmation. |
 
-Links shall retain their pinned revisions. A link that does not name the
-current revision shall be stale.
+A confirmation shall name the requirement revision, Git commit, actor, time,
+and result. The result shall state that code changed or that existing code was
+confirmed.
 
-## Graphs
+Task completion shall not confirm implementation by itself. A confirmation
+may refer to the task and pull request that produced the result.
 
-| Relation | From | To | Effect |
-|---|---|---|---|
-| `refines` | Requirement revision | Requirement revision | Trace DAG |
-| `depends_on` | Task | Task | Work DAG |
-| `contributes_to` | Task | Requirement revision | Task scope |
-| `impl` | Source | Requirement revision | Implementation evidence |
-| `test` | Source | Requirement revision | Verification evidence |
+When a requirement gets a new revision, the server shall:
 
-Only `depends_on` shall control task order. Refinement shall not imply task
-order.
+1. Set the requirement to `unimplemented`.
+2. Find all transitive descendants.
+3. Set each descendant to `needs_reconciliation`.
+4. Record the changed ancestor as an unresolved cause for each affected
+   descendant.
 
-Task completion shall not imply requirement fulfillment. Version 1 shall
-report task state, trace coverage, and evidence separately.
+An active implementation or reconciliation task may set an unimplemented or
+affected requirement to `in_progress`. A confirmation shall resolve the known
+causes for that requirement revision and set it to `implemented`.
 
-Each task dependency shall exist. A task shall not depend on itself. The work
-graph shall be acyclic.
+## Tasks and leases
 
-`impact ID` shall walk reverse refinement links. It shall report tasks and
-evidence that cite affected revisions. It shall report stale links. It shall
-not change task state.
+A task shall have a title, description, priority, state, requirement links,
+and task dependencies. A requirement link shall have the purpose `implement`
+or `reconcile`.
 
-## Tasks
+A task is ready when it is open, has no active lease, and all its dependencies
+are complete. Ready tasks shall sort by descending priority and then by ID.
 
-A task update shall use an expected current version. Zero shall mean that the
-task must not exist. A mismatch shall fail without a change.
+A claim shall create one lease in one transaction. A lease shall identify the
+task, agent, fence, claim time, and expiry time. Claim, heartbeat, release, and
+completion operations shall use the current lease and fence.
 
-A task is ready when all these conditions are true:
-
-- Its definition is valid.
-- Its state is open.
-- It has no current lease.
-- Each dependency is complete for its current definition hash.
-- Each referenced requirement is approved and current.
-
-Ready tasks shall sort by descending priority, then by ID.
-
-A task definition change shall increase its version. It shall reopen a
-completed task. The audit log shall retain the prior completion.
-
-The definition hash shall cover the complete parsed task object. It shall use
-RFC 8785 and SHA-256.
-
-## Leases
-
-A claim shall use one database transaction. It shall increment the task fence
-and create a unique lease. The lease shall contain the agent, claim time,
-heartbeat time, and expiry time.
-
-Heartbeat, release, and completion shall require the current lease ID and
-fence. An expired lease has no authority. A new claim can replace it. No
-background reaper is required.
-
-Completion shall require an unexpired lease and a Git commit. It shall record
-the task hash and commit. External quality gates shall test the change.
-
-The default lease duration shall be 30 minutes. All times shall use UTC and
-RFC 3339.
-
-## Evidence
-
-Source comments can contain these markers:
-
-```text
-req:impl:SWR-SESSION-001@1
-req:test:SWR-SESSION-001@1
-```
-
-`scan` shall record the kind, requirement revision, path, line, commit, and
-content hash. The content hash shall use SHA-256 on the file bytes. Evidence
-for an older revision is stale.
-
-An approved software requirement shall have `impl` evidence.
-
-Evidence markers shall link existing source files or tests. They shall not
-require one script for each requirement.
+A completed task shall record its Git commit. A task can link to zero or more
+pull requests. A pull request can link to more than one task.
 
 ## Audit
 
-Each successful state change shall append one audit event in the same
-transaction. An event shall contain a sequence, time, actor, kind, entity, and
-JSON data. An event shall not be updated or deleted.
+Each successful state change shall append an audit event in the same
+transaction. An audit event shall identify the time, actor, kind, entity, and
+event data. It shall not be updated or deleted.
 
-Event kinds shall include requirement creation and revision, task creation and
-change, lease claim and release, task completion, and evidence recording.
+## Input
 
-The audit log records database actions. It does not protect the database from
-an administrator who can replace the file.
+- Input shall use UTF-8 and the YAML 1.2 Core Schema.
+- One input file shall contain one object.
+- Parsers shall reject duplicate keys and unknown fields.
+- Parsers shall reject aliases, anchors, merge keys, and custom tags.
+- A resource `check` action shall validate input without a database change.
+- A resource `create` or `update` action shall validate and store input.
 
-## CLI
+## Server, CLI, and rendering
+
+The same `reqdb` binary shall run the server and act as a CLI client. Client
+commands shall use `--server URL` or `REQDB_SERVER`.
+
+Resource commands shall use this form:
+
+```text
+reqdb RESOURCE ACTION [ID] [OPTIONS]
+```
+
+Resource names shall be singular. IDs shall be positional arguments. Options
+shall supply attributes and operation data. Commands that use the same action
+shall use the same action name.
+
+The core resource commands are:
 
 | Command | Result |
 |---|---|
-| `reqdb serve --db FILE [--listen ADDR]` | Own the database and serve clients. |
-| `reqdb check FILE` | Validate one YAML input file. |
-| `reqdb apply FILE --if-current N` | Create or update one object. |
-| `reqdb get ID[@REVISION]` | Show one object and its links. |
-| `reqdb history REQUIREMENT` | List all requirement revisions. |
-| `reqdb audit [ID]` | List audit events. |
-| `reqdb render --out DIR` | Generate four specifications and a trace matrix. |
-| `reqdb impact ID` | Show downstream impact and stale links. |
-| `reqdb scan --commit SHA` | Record source evidence. |
-| `reqdb ready` | List ready tasks. |
-| `reqdb claim [TASK] --agent ID [--ttl DURATION]` | Claim one ready task. |
-| `reqdb heartbeat LEASE --fence N [--ttl DURATION]` | Extend one lease. |
-| `reqdb release LEASE --fence N` | Release one lease. |
-| `reqdb complete LEASE --fence N --commit SHA` | Complete one task. |
+| `requirement list` | List requirements. |
+| `requirement get ID[@REVISION]` | Show one requirement revision. |
+| `requirement check --from-file FILE` | Validate one requirement file. |
+| `requirement create --from-file FILE` | Create a requirement. |
+| `requirement update ID --from-file FILE` | Create a requirement revision. |
+| `requirement confirm ID[@REVISION] --commit SHA` | Confirm that code matches a revision. |
+| `requirement render ID` | Render one requirement and its context. |
+| `task list` | List tasks. |
+| `task get ID` | Show one task. |
+| `task create [OPTIONS]` | Create a task. |
+| `task ready` | List ready tasks. |
+| `task lease ID --agent ID` | Lease one task. |
+| `task complete ID --lease ID --fence N --commit SHA` | Complete one task. |
+| `task link-pr ID --url URL` | Link a task to a pull request. |
+| `lease heartbeat ID --fence N` | Extend one lease. |
+| `lease release ID --fence N` | Release one lease. |
 
-Client commands shall use `--server URL` or `REQDB_SERVER`. The coordinator
-shall create an absent database.
+Server-wide and graph-wide operations shall remain top-level commands:
 
-For `apply`, `--if-current` shall name the expected requirement revision or
-task version. Zero shall mean that the object must not exist.
+| Command | Result |
+|---|---|
+| `serve` | Own the SQLite database and serve clients. |
+| `trace [REQUIREMENT]` | Show the requirement hierarchy. |
+| `impact REQUIREMENT` | Show affected requirements and tasks. |
+| `audit [ENTITY]` | List audit events. |
+| `render [OPTIONS]` | Generate requirement and reconciliation views. |
 
-Each command shall support `--json`. JSON output shall use one envelope:
-
-```json
-{"ok":true,"data":{}}
-```
-
-```json
-{"ok":false,"error":{"code":"CODE","message":"Text."}}
-```
-
-JSON mode shall write only the envelope to standard output. Diagnostics shall
-go to standard error. Exit code `0` means success, `1` means failure, and `2`
-means invalid use. No ready task is a successful result with `data: null`.
-
-`claim` shall return the task definition, requirement revisions, lease ID,
-fence, expiry time, and definition hash.
+Human-readable output shall be the default. Each command shall support
+`--json`. Invalid input shall show the error and command-specific usage. A
+rendered view may select a level, hierarchy root, or reconciliation state.

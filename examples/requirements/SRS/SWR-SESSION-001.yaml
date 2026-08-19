@@ -3,7 +3,6 @@ schema: requirement/v1
 id: SWR-SESSION-001
 level: software
 revision: 1
-status: approved
 title: Return HTTP 401 for an expired session
 statement: >-
   The authentication service shall return HTTP 401 for each request that uses

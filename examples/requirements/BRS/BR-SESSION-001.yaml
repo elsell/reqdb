@@ -3,7 +3,6 @@ schema: requirement/v1
 id: BR-SESSION-001
 level: business
 revision: 1
-status: approved
 title: Limit access duration
 statement: >-
   The organization shall limit each authenticated session to a finite
