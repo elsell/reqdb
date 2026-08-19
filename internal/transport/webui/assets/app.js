@@ -141,7 +141,7 @@ function button(hasChildren, collapsed, toggle) {
   return control;
 }
 
-function nodeRow({ id, title, text, meta, stateValue, stateLabel, type, hasChildren, collapsed, toggle, group, actions, selected, select }) {
+function nodeRow({ id, title, text, meta, lifecycleValue, stateValue, stateLabel, type, hasChildren, collapsed, toggle, group, actions, selected, select }) {
   const row = element("div", `tree-row${group ? " group" : ""}${selected ? " selected" : ""}`);
   row.title = [id, title, text, meta, stateValue].filter(Boolean).join(" — ");
   row.append(button(hasChildren, collapsed, toggle), element("span", `icon ${group ? "folder" : type}`));
@@ -149,6 +149,7 @@ function nodeRow({ id, title, text, meta, stateValue, stateLabel, type, hasChild
   row.append(element("span", "node-title", title));
   if (text) row.append(element("span", "node-text", `— ${text}`));
   if (meta) row.append(element("span", "node-meta", meta));
+  if (lifecycleValue === "retired") row.append(element("span", "node-lifecycle retired", "retired"));
   if (stateValue) row.append(element("span", `node-state ${stateValue}`, stateLabel || stateValue.replaceAll("_", " ")));
   if (actions?.length) row.append(actionsMenu(actions));
   if (select) {
@@ -226,20 +227,26 @@ function renderExplorer() {
   elements.explorer.className = "tree";
   const requirementOrder = (left, right) => left.id.localeCompare(right.id);
   const requirements = graph(state.requirements, item => item.revision.parents.map(parent => parent.id), requirementOrder);
-  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.reconciliation_state];
-  describeRequirement = item => ({
-    id: `${item.id}@${item.current_revision}`, title: item.revision.title, stateValue: item.reconciliation_state,
-    actions: [
-      { label: "Copy ID", run: () => copy(`${item.id}@${item.current_revision}`) },
-      { label: "Confirm implementation…", run: () => {
+  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state];
+  describeRequirement = item => {
+    const actions = [{ label: "Copy ID", run: () => copy(`${item.id}@${item.current_revision}`) }];
+    if (item.lifecycle_state !== "retired") {
+      actions.push({ label: "Confirm implementation…", run: () => {
         const commit = window.prompt(`Git commit for ${item.id}@${item.current_revision}:`);
         if (!commit) return;
         const result = window.prompt("Result: code_changed or existing_code_confirmed", "code_changed");
         if (!result) return;
         mutate(`/v1/requirements/${encodeURIComponent(item.id)}/confirm`, { commit, result });
-      } },
-    ],
-  });
+      } });
+      actions.push({ label: "Retire…", run: () => {
+        if (window.confirm(`Retire requirement ${item.id}?`)) mutate(`/v1/requirements/${encodeURIComponent(item.id)}/retire`, {});
+      } });
+    }
+    return {
+      id: `${item.id}@${item.current_revision}`, title: item.revision.title,
+      lifecycleValue: item.lifecycle_state, stateValue: item.reconciliation_state, actions,
+    };
+  };
 
   const taskOrder = (left, right) => right.priority - left.priority || left.id.localeCompare(right.id);
   const tasks = graph(state.tasks, item => item.depends_on || [], taskOrder);
@@ -320,12 +327,17 @@ function renderDetails() {
     if (!item) { state.selected = null; renderDetails(); return; }
     const description = describeRequirement(item);
     elements.details.append(element("h2", "detail-title", `${item.id}@${item.current_revision}: ${item.revision.title}`));
-    elements.details.append(element("div", `detail-status node-state ${item.reconciliation_state}`, item.reconciliation_state.replaceAll("_", " ")));
+    const statuses = element("div", "detail-statuses");
+    statuses.append(element("span", `detail-status lifecycle ${item.lifecycle_state}`, item.lifecycle_state));
+    statuses.append(element("span", `detail-status node-state ${item.reconciliation_state}`, item.reconciliation_state.replaceAll("_", " ")));
+    elements.details.append(statuses);
     elements.details.append(detailActions(description.actions));
     const properties = element("div", "properties");
     property(properties, "ID", item.id);
     property(properties, "Revision", String(item.current_revision));
     property(properties, "Level", item.revision.level);
+    property(properties, "Lifecycle", item.lifecycle_state);
+    property(properties, "Reconciliation", item.reconciliation_state);
     property(properties, "Parents", item.revision.parents.map(parent => `${parent.id}@${parent.revision}`).join(", "));
     property(properties, "Depends on", (item.revision.dependencies || []).map(value => `${value.id}@${value.revision}`).join(", "));
     property(properties, "Actor", item.revision.actor_id);
@@ -398,6 +410,7 @@ function renderSummary() {
   const values = [
     [state.requirements.length, "requirements"],
     [state.requirements.filter(item => item.reconciliation_state === "implemented").length, "implemented"],
+    [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired"],
     [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation"],
     [state.tasks.filter(item => item.state === "open").length, "open tasks"],
     [state.tasks.filter(item => item.state === "complete").length, "complete tasks"],
