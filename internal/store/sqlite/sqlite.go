@@ -337,6 +337,58 @@ func (store *Store) ListRequirements(ctx context.Context, cursor string, limit i
 	return page, nil
 }
 
+func (store *Store) ListReadyRequirements(ctx context.Context, cursor string, limit int) (domain.Page[domain.Requirement], error) {
+	query := store.db.WithContext(ctx).Model(&requirementRow{}).
+		Where("requirement.id > ?", cursor).
+		Where("requirement.lifecycle_state=?", domain.Active).
+		Where("requirement.reconciliation_state IN ?", []domain.ReconciliationState{domain.Unimplemented, domain.NeedsReconciliation}).
+		Where(`NOT EXISTS (
+SELECT 1 FROM task_requirement tr
+JOIN task t ON t.id=tr.task_id
+WHERE tr.requirement_id=requirement.id
+  AND tr.requirement_revision=requirement.current_revision
+  AND t.state!='complete'
+)`).
+		Where(requirementReadyDependenciesSQL).
+		Order("requirement.id").Limit(limit + 1)
+	var rows []requirementRow
+	if err := query.Find(&rows).Error; err != nil {
+		return domain.Page[domain.Requirement]{}, err
+	}
+	page := domain.Page[domain.Requirement]{Items: []domain.Requirement{}}
+	if len(rows) > limit {
+		page.NextCursor = rows[limit-1].ID
+		rows = rows[:limit]
+	}
+	for _, row := range rows {
+		item, err := store.GetRequirement(ctx, domain.RequirementRef{ID: row.ID})
+		if err != nil {
+			return page, err
+		}
+		page.Items = append(page.Items, item)
+	}
+	return page, nil
+}
+
+const requirementReadyDependenciesSQL = `NOT EXISTS (
+WITH RECURSIVE deps(id, revision) AS (
+  SELECT rd.dependency_id, rd.dependency_revision
+  FROM requirement_dependency rd
+  WHERE rd.requirement_id=requirement.id
+    AND rd.requirement_revision=requirement.current_revision
+  UNION
+  SELECT rd.dependency_id, rd.dependency_revision
+  FROM requirement_dependency rd
+  JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
+)
+SELECT 1 FROM deps d
+LEFT JOIN requirement r ON r.id=d.id
+WHERE r.id IS NULL
+   OR r.current_revision!=d.revision
+   OR r.lifecycle_state!='active'
+   OR r.reconciliation_state!='implemented'
+)`
+
 func (store *Store) ConfirmRequirement(ctx context.Context, ref domain.RequirementRef, commit, result, actor string) (domain.Requirement, error) {
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root requirementRow

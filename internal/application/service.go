@@ -160,6 +160,12 @@ func (service Service) ListRequirements(ctx context.Context, cursor string, limi
 	}
 	return service.Store.ListRequirements(ctx, cursor, limit, level, state)
 }
+func (service Service) ListReadyRequirements(ctx context.Context, cursor string, limit int, actor string) (domain.Page[domain.Requirement], error) {
+	if err := service.authorize(ctx, actor, "requirement.read", ""); err != nil {
+		return domain.Page[domain.Requirement]{}, err
+	}
+	return service.Store.ListReadyRequirements(ctx, cursor, limit)
+}
 func (service Service) ConfirmRequirement(ctx context.Context, ref domain.RequirementRef, commit, result, actor string) (domain.Requirement, error) {
 	if err := service.authorize(ctx, actor, "requirement.confirm", ref.ID); err != nil {
 		return domain.Requirement{}, err

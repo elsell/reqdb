@@ -38,6 +38,7 @@ Usage:
 
 Actions:
   list       List requirements
+  ready      List requirements that are ready for work
   get        Show one requirement revision
   check      Validate a requirement file
   create     Create a requirement
@@ -113,6 +114,11 @@ Options:
   --level LEVEL     Filter by business, stakeholder, system, or software
   --state STATE     Filter by reconciliation state
   --json            Print the API response as JSON
+`,
+	"requirement ready": `List requirements that are ready for implementation or reconciliation.
+
+Usage:
+  reqdb requirement ready [--cursor ID] [options]
 `,
 	"requirement get": `Show one requirement revision.
 

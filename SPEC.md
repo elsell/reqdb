@@ -69,6 +69,16 @@ A retired requirement cannot be revised or confirmed. A task that links to a
 retired requirement, or depends on a retired requirement, shall not be ready or
 leaseable.
 
+A requirement is ready when all these conditions are true:
+
+- Its lifecycle is `active`.
+- Its reconciliation state is `unimplemented` or `needs_reconciliation`.
+- All transitive requirement dependencies are current, active, and
+  `implemented`.
+- No non-complete task links to its current revision.
+
+Refinement parents shall not affect readiness.
+
 ## Reconciliation
 
 Reconciliation describes the relation between a requirement revision and the
@@ -165,6 +175,7 @@ The core resource commands are:
 | Command | Result |
 |---|---|
 | `requirement list` | List requirements. |
+| `requirement ready` | List requirements that are ready for work. |
 | `requirement get ID[@REVISION]` | Show one requirement revision. |
 | `requirement check --from-file FILE` | Validate one requirement file. |
 | `requirement create --from-file FILE` | Create a requirement. |

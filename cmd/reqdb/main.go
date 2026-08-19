@@ -182,8 +182,13 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 	}
 	action := args[0]
 	switch action {
-	case "list":
-		path := "/v1/requirements?cursor=" + url.QueryEscape(option(args, "--cursor")) + "&level=" + url.QueryEscape(option(args, "--level")) + "&state=" + url.QueryEscape(option(args, "--state"))
+	case "list", "ready":
+		path := "/v1/requirements?cursor=" + url.QueryEscape(option(args, "--cursor"))
+		if action == "ready" {
+			path += "&ready=true"
+		} else {
+			path += "&level=" + url.QueryEscape(option(args, "--level")) + "&state=" + url.QueryEscape(option(args, "--state"))
+		}
 		return call(ctx, api, http.MethodGet, path, nil, jsonOutput)
 	case "get":
 		if len(args) < 2 {

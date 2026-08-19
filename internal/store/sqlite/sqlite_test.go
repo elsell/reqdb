@@ -432,3 +432,61 @@ func TestRetireRequirementInvalidatesDownstreamAndBlocksTasks(t *testing.T) {
 		t.Fatal("confirmed a retired requirement")
 	}
 }
+
+func TestReadyRequirementsFollowDependenciesAndTasks(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	base := requirement("SWR-BASE-001", "software", 1)
+	dependent := requirement("SWR-DEPENDENT-001", "software", 1)
+	dependent.Links.DependsOn = []string{"SWR-BASE-001@1"}
+	for _, input := range []domain.RequirementInput{base, dependent} {
+		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertReadyRequirements(t, store, "SWR-BASE-001")
+
+	task := domain.TaskInput{Schema: "task/v1", ID: "T-1", Title: "Implement base", Description: "Implement the base requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-BASE-001@1", Purpose: "implement"}}}
+	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	assertReadyRequirements(t, store)
+
+	lease, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CompleteTask(ctx, task.ID, lease.LeaseID, lease.Fence, "abc123", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	assertReadyRequirements(t, store, "SWR-BASE-001")
+
+	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: base.ID}, "abc123", "code_changed", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	assertReadyRequirements(t, store, "SWR-DEPENDENT-001")
+	if _, err := store.RetireRequirement(ctx, dependent.ID, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	assertReadyRequirements(t, store)
+}
+
+func assertReadyRequirements(t *testing.T, store *sqlite.Store, expected ...string) {
+	t.Helper()
+	page, err := store.ListReadyRequirements(context.Background(), "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := make([]string, 0, len(page.Items))
+	for _, item := range page.Items {
+		actual = append(actual, item.ID)
+	}
+	if strings.Join(actual, ",") != strings.Join(expected, ",") {
+		t.Fatalf("ready requirements are %v, expected %v", actual, expected)
+	}
+}
