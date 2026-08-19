@@ -1,14 +1,14 @@
 "use strict";
 
 const state = {
-  requirements: [], tasks: [], leases: [], filter: "", refreshTimer: 0, selected: null,
+  requirements: [], tasks: [], leases: [], events: [], filter: "", refreshTimer: 0, selected: null,
   collapsed: new Set(), collapsedGroups: new Set(), details: new Map(),
 };
 const elements = {
-  content: document.querySelector(".content"), leasePanel: document.querySelector("#lease-panel"),
+  content: document.querySelector(".content"), activityPanels: document.querySelector("#activity-panels"), leasePanel: document.querySelector("#lease-panel"),
   verticalSplitter: document.querySelector("#vertical-splitter"), horizontalSplitter: document.querySelector("#horizontal-splitter"),
   explorer: document.querySelector("#explorer"), details: document.querySelector("#details"), leases: document.querySelector("#leases"),
-  leaseCount: document.querySelector("#lease-count"), summary: document.querySelector("#summary"),
+  leaseCount: document.querySelector("#lease-count"), events: document.querySelector("#events"), eventCount: document.querySelector("#event-count"), summary: document.querySelector("#summary"),
   error: document.querySelector("#error"), updated: document.querySelector("#updated"),
   refresh: document.querySelector("#refresh"), filter: document.querySelector("#filter"),
   expandAll: document.querySelector("#expand-all"), collapseAll: document.querySelector("#collapse-all"),
@@ -295,7 +295,7 @@ function renderBranch(item, children, values, describe, type, depth) {
   return wrapper;
 }
 
-function groupNode(key, title, count, roots, children, values, describe, type) {
+function groupNode(key, title, count, roots, children, values, describe, type, renderNode) {
   const collapsed = state.collapsedGroups.has(key) && !state.filter;
   const wrapper = element("div", "tree-node");
   const complete = type === "requirement"
@@ -311,7 +311,7 @@ function groupNode(key, title, count, roots, children, values, describe, type) {
     const childList = element("div", "tree-children");
     childList.setAttribute("role", "group");
     for (const root of roots) {
-      const child = renderBranch(root, children, values, describe, type, 1);
+      const child = renderNode ? renderNode(root, 1) : renderBranch(root, children, values, describe, type, 1);
       if (child) childList.append(child);
     }
     if (!childList.children.length) childList.append(element("div", "empty", count ? "No items match the filter." : "No items found."));
@@ -373,7 +373,6 @@ function renderExplorer() {
   };
 
   const taskOrder = (left, right) => right.priority - left.priority || left.id.localeCompare(right.id);
-  const tasks = graph(state.tasks, item => item.depends_on || [], taskOrder);
   const taskValues = item => [item.id, item.title, item.description, item.state, ...(item.requirements || []).map(link => link.requirement), ...(item.readiness?.blockers || [])];
   describeTask = item => {
     const lease = state.leases.find(value => value.task_id === item.id);
@@ -415,9 +414,57 @@ function renderExplorer() {
     };
   };
 
+  const tasksByRequirement = new Map(state.requirements.map(item => [item.id, []]));
+  for (const task of state.tasks) {
+    for (const link of task.requirements || []) {
+      const requirementID = link.requirement.split("@", 1)[0];
+      const linkedTasks = tasksByRequirement.get(requirementID);
+      if (linkedTasks && !linkedTasks.some(value => value.id === task.id)) linkedTasks.push(task);
+    }
+  }
+  for (const linkedTasks of tasksByRequirement.values()) linkedTasks.sort(taskOrder);
+
+  const requirementHasMatch = item => {
+    if (matches(requirementValues(item))) return true;
+    if ((tasksByRequirement.get(item.id) || []).some(task => matches(taskValues(task)))) return true;
+    return (requirements.children.get(item.id) || []).some(requirementHasMatch);
+  };
+  const renderTaskLeaf = (item, depth) => {
+    if (!matches(taskValues(item))) return null;
+    const wrapper = element("div", "tree-node");
+    wrapper.append(nodeRow({
+      ...describeTask(item), type: "task", depth, hasChildren: false,
+      selected: state.selected?.type === "task" && state.selected.id === item.id,
+      select: () => { state.selected = { type: "task", id: item.id }; renderDetails(); loadDetail("task", item.id); },
+    }));
+    return wrapper;
+  };
+  const renderRequirementBranch = (item, depth) => {
+    if (!requirementHasMatch(item)) return null;
+    const requirementChildren = (requirements.children.get(item.id) || []).filter(requirementHasMatch);
+    const taskChildren = (tasksByRequirement.get(item.id) || []).filter(task => matches(taskValues(task)));
+    const hasChildren = requirementChildren.length > 0 || taskChildren.length > 0;
+    const key = `requirement:${item.id}`;
+    const collapsed = state.collapsed.has(key) && !state.filter;
+    const wrapper = element("div", "tree-node");
+    wrapper.append(nodeRow({
+      ...describeRequirement(item), type: "requirement", depth, hasChildren, collapsed,
+      selected: state.selected?.type === "requirement" && state.selected.id === item.id,
+      select: () => { state.selected = { type: "requirement", id: item.id }; renderDetails(); loadDetail("requirement", item.id); },
+      toggle: () => { collapsed ? state.collapsed.delete(key) : state.collapsed.add(key); render(); },
+    }));
+    if (hasChildren && !collapsed) {
+      const childList = element("div", "tree-children");
+      childList.setAttribute("role", "group");
+      for (const child of requirementChildren) childList.append(renderRequirementBranch(child, depth + 1));
+      for (const task of taskChildren) childList.append(renderTaskLeaf(task, depth + 1));
+      wrapper.append(childList);
+    }
+    return wrapper;
+  };
+
   elements.explorer.append(
-    groupNode("requirements", "Requirements", state.requirements.length, requirements.roots, requirements.children, requirementValues, describeRequirement, "requirement"),
-    groupNode("tasks", "Tasks", state.tasks.length, tasks.roots, tasks.children, taskValues, describeTask, "task"),
+    groupNode("requirements", "Requirements", state.requirements.length, requirements.roots, requirements.children, requirementValues, describeRequirement, "requirement", renderRequirementBranch),
   );
 }
 
@@ -544,7 +591,6 @@ function renderLeases() {
   elements.leases.className = "lease-list";
   elements.leaseCount.textContent = state.leases.length;
   elements.leasePanel.classList.toggle("empty", state.leases.length === 0);
-  elements.horizontalSplitter.hidden = state.leases.length === 0;
   const header = element("div", "lease-header");
   for (const label of ["Lease", "Task", "Agent", "Fence", "Claimed", "Expires", "Actions"]) header.append(leaseCell("", label));
   elements.leases.append(header);
@@ -588,6 +634,32 @@ function renderLeases() {
   }
 }
 
+function renderEvents() {
+  elements.events.replaceChildren();
+  elements.eventCount.textContent = state.events.length;
+  const header = element("div", "event-header");
+  for (const label of ["Time", "Event", "Item", "Correlation"]) header.append(element("div", "event-cell", label));
+  elements.events.append(header);
+  if (!state.events.length) {
+    elements.events.append(element("div", "empty", "Waiting for change events."));
+    return;
+  }
+  for (const event of state.events) {
+    const fields = event.fields || {};
+    const entity = fields.requirement_id || fields.task_id || fields.lease_id || "—";
+    const correlation = event.correlation_id || "—";
+    const row = element("div", "event-row");
+    row.title = `${event.name} — ${entity} — ${correlation}`;
+    row.append(
+      element("div", "event-cell", new Date(event.received_at).toLocaleTimeString()),
+      element("div", "event-cell event-kind", event.name),
+      element("div", "event-cell event-entity", entity),
+      element("div", "event-cell event-correlation", correlation.slice(0, 8)),
+    );
+    elements.events.append(row);
+  }
+}
+
 function renderSummary() {
   const values = [
     [state.requirements.length, "requirements", "requirement"],
@@ -605,7 +677,7 @@ function renderSummary() {
   }));
 }
 
-function render() { renderExplorer(); renderDetails(); renderLeases(); renderSummary(); }
+function render() { renderExplorer(); renderDetails(); renderLeases(); renderEvents(); renderSummary(); }
 
 function connect() {
   const events = new EventSource("/v1/events");
@@ -613,7 +685,18 @@ function connect() {
     elements.connectionDot.className = "connection-dot online";
     elements.connectionText.textContent = "Live";
   });
-  events.addEventListener("change", scheduleRefresh);
+  events.addEventListener("change", event => {
+    try {
+      const change = JSON.parse(event.data);
+      change.received_at = new Date().toISOString();
+      state.events.unshift(change);
+      state.events = state.events.slice(0, 100);
+      renderEvents();
+    } catch (_) {
+      // A malformed notification can still trigger a state refresh.
+    }
+    scheduleRefresh();
+  });
   events.onerror = () => {
     elements.connectionDot.className = "connection-dot offline";
     elements.connectionText.textContent = "Reconnecting";
@@ -658,7 +741,7 @@ elements.verticalSplitter.addEventListener("keydown", event => {
 elements.horizontalSplitter.addEventListener("keydown", event => {
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
   event.preventDefault();
-  const current = elements.leasePanel.getBoundingClientRect().height;
+  const current = elements.activityPanels.getBoundingClientRect().height;
   const height = Math.max(70, Math.min(current + (event.key === "ArrowUp" ? 24 : -24), window.innerHeight * .55));
   document.documentElement.style.setProperty("--lease-height", `${height}px`);
 });
@@ -667,8 +750,8 @@ elements.refresh.addEventListener("click", refresh);
 elements.filter.addEventListener("input", event => { state.filter = event.target.value.trim().toLowerCase(); render(); });
 elements.expandAll.addEventListener("click", () => { state.collapsed.clear(); state.collapsedGroups.clear(); render(); });
 elements.collapseAll.addEventListener("click", () => {
-  state.collapsedGroups = new Set(["requirements", "tasks"]);
-  state.collapsed = new Set([...state.requirements.map(item => `requirement:${item.id}`), ...state.tasks.map(item => `task:${item.id}`)]);
+  state.collapsedGroups = new Set(["requirements"]);
+  state.collapsed = new Set(state.requirements.map(item => `requirement:${item.id}`));
   render();
 });
 document.addEventListener("click", closeActions);

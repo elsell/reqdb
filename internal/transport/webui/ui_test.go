@@ -33,7 +33,13 @@ func TestEmbeddedUI(t *testing.T) {
 	}
 	body, _ = io.ReadAll(response.Body)
 	_ = response.Body.Close()
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `new EventSource("/v1/events")`) {
+	script := string(body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(script, `new EventSource("/v1/events")`) {
 		t.Fatalf("script response: status=%d body=%q", response.StatusCode, body)
+	}
+	for _, expected := range []string{"tasksByRequirement", "renderEvents", "state.events.unshift"} {
+		if !strings.Contains(script, expected) {
+			t.Errorf("script does not contain %q", expected)
+		}
 	}
 }

@@ -32,6 +32,7 @@
     <symbol id="i-review" viewBox="0 0 16 16"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8z"/><circle cx="8" cy="8" r="2"/></symbol>
     <symbol id="i-ready" viewBox="0 0 16 16"><path d="m8 1.5 2 4.5 4.5 2-4.5 2-2 4.5L6 10 1.5 8 6 6z"/><path d="m5.5 8 1.5 1.5 3.5-3.5"/></symbol>
     <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 7v4M8 4.5v.1"/></symbol>
+    <symbol id="i-event" viewBox="0 0 16 16"><path d="M3 2.5h10v11H3zM5 5h6M5 8h6M5 11h4"/><circle class="fill" cx="3" cy="5" r="1"/></symbol>
   </svg>
   <header class="topbar">
     <h1>reqdb</h1>
@@ -67,10 +68,16 @@
       </section>
     </div>
     <div id="horizontal-splitter" class="splitter horizontal" role="separator" aria-label="Resize current leases" aria-orientation="horizontal" tabindex="0"></div>
-    <section id="lease-panel" class="lease-panel" aria-label="Current leases">
-      <div class="pane-heading"><svg class="ui-icon" aria-hidden="true"><use href="#i-lease"></use></svg>Current Leases <span id="lease-count" class="pane-count">0</span></div>
-      <div id="leases" class="lease-list loading">Loading…</div>
-    </section>
+    <div id="activity-panels" class="activity-panels">
+      <section id="lease-panel" class="lease-panel" aria-label="Current leases">
+        <div class="pane-heading"><svg class="ui-icon" aria-hidden="true"><use href="#i-lease"></use></svg>Current Leases <span id="lease-count" class="pane-count">0</span></div>
+        <div id="leases" class="lease-list loading">Loading…</div>
+      </section>
+      <section class="event-panel" aria-label="Recent events">
+        <div class="pane-heading"><svg class="ui-icon" aria-hidden="true"><use href="#i-event"></use></svg>Recent Events <span id="event-count" class="pane-count">0</span></div>
+        <div id="events" class="event-list"><div class="empty">Waiting for change events.</div></div>
+      </section>
+    </div>
     <section id="summary" class="summary" aria-label="Summary"></section>
   </main>
 </body>

@@ -122,10 +122,10 @@ button:disabled { opacity: .55; }
 .detail-section h3 { margin: 0; padding: 4px 5px; background: var(--chrome); border: 1px solid #c4cad1; font-size: 12px; }
 .detail-text { margin: 0; padding: 6px; border: 1px solid #c4cad1; border-top: 0; line-height: 1.4; }
 .detail-list { margin: 0; padding: 6px 6px 6px 25px; border: 1px solid #c4cad1; border-top: 0; line-height: 1.4; }
-.lease-panel { height: var(--lease-height, 145px); min-height: 24px; max-height: 55vh; flex: none; display: flex; flex-direction: column; }
-.lease-panel.empty { height: 24px; }
+.activity-panels { height: var(--lease-height, 145px); min-height: 70px; max-height: 55vh; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .7fr); }
+.lease-panel, .event-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.event-panel { border-left: 1px solid #7e8791; }
 .lease-panel.empty .lease-list { display: none; }
-.lease-panel.empty + .summary { border-top: 0; }
 .lease-list { flex: 1; min-height: 0; overflow: auto; }
 .lease-header, .lease-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) minmax(110px, .7fr) minmax(110px, .7fr) 55px 155px 155px 145px; min-width: 1000px; }
 .lease-header { position: sticky; z-index: 2; top: 0; height: 21px; align-items: center; background: linear-gradient(#f7f8f9, #dce0e4); border-bottom: 1px solid var(--line); font-weight: 700; }
@@ -139,6 +139,14 @@ button:disabled { opacity: .55; }
 .lease-expiry.expiring { color: var(--warn); }
 .lease-actions { display: flex; gap: 3px; padding: 2px 4px; }
 .lease-actions button { height: 18px; padding: 0 5px; font-size: 11px; }
+.event-list { flex: 1; min-height: 0; overflow: auto; }
+.event-header, .event-row { display: grid; grid-template-columns: 78px minmax(130px, .9fr) minmax(110px, 1fr) 90px; min-width: 520px; }
+.event-header { position: sticky; z-index: 2; top: 0; height: 21px; align-items: center; background: linear-gradient(#f7f8f9, #dce0e4); border-bottom: 1px solid var(--line); font-weight: 700; }
+.event-row { min-height: 22px; align-items: center; border-bottom: 1px solid #d8dde2; }
+.event-row:hover { background: var(--select); }
+.event-cell { min-width: 0; height: 100%; padding: 3px 5px; overflow: hidden; border-right: 1px solid #c2c8cf; text-overflow: ellipsis; white-space: nowrap; }
+.event-kind { font-weight: 700; }
+.event-entity, .event-correlation { font-family: Consolas, "Liberation Mono", monospace; }
 .summary { min-height: 22px; flex: none; display: flex; align-items: center; padding: 0 5px; background: var(--chrome); border-top: 1px solid var(--line); }
 .summary-item { display: inline-flex; align-items: center; gap: 3px; padding: 0 9px; border-right: 1px solid #aeb5bd; color: var(--muted); }
 .summary-item:first-child { padding-left: 0; }
@@ -152,5 +160,5 @@ button:disabled { opacity: .55; }
   .content { grid-template-columns: 1fr; grid-template-rows: minmax(220px, 3fr) minmax(180px, 2fr); }
   .splitter.vertical { display: none; }
   .detail-panel { border-top: 1px solid #7e8791; }
-  .lease-panel { height: 125px; }
+  .activity-panels { height: 125px; grid-template-columns: 1fr 1fr; }
 }
