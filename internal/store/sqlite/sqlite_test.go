@@ -89,6 +89,51 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 	}
 }
 
+func TestListActiveLeasesWithFiltersAndPagination(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	for _, id := range []string{"T-1", "T-2"} {
+		input := domain.TaskInput{Schema: "task/v1", ID: id, Title: id, Description: "Perform the implementation work.", Priority: 1}
+		if _, err := store.CreateTask(ctx, input, "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.LeaseTask(ctx, "T-1", "agent-a", time.Minute, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LeaseTask(ctx, "T-2", "agent-b", time.Minute, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := store.ListLeases(ctx, "", 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.NextCursor == "" {
+		t.Fatalf("unexpected first page: %+v", page)
+	}
+	page, err = store.ListLeases(ctx, page.NextCursor, 1, "", "")
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("unexpected second page: %+v, %v", page, err)
+	}
+	page, err = store.ListLeases(ctx, "", 10, "agent-a", "T-1")
+	if err != nil || len(page.Items) != 1 || page.Items[0].LeaseID != first.LeaseID {
+		t.Fatalf("unexpected filtered leases: %+v, %v", page, err)
+	}
+	if err := store.Release(ctx, first.LeaseID, first.Fence, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	page, err = store.ListLeases(ctx, "", 10, "", "T-1")
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("released lease is still active: %+v, %v", page, err)
+	}
+}
+
 func TestDatabaseCanReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reqdb.sqlite")
 	first, err := sqlite.Open(path)
@@ -137,11 +182,18 @@ END;
 	}
 	defer database.Close()
 	var migrations int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001')`).Scan(&migrations); err != nil {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002')`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 2 {
+	if migrations != 3 {
 		t.Fatalf("database recorded %d expected migrations", migrations)
+	}
+	var dependencyTables int
+	if err := database.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='requirement_dependency'`).Scan(&dependencyTables); err != nil {
+		t.Fatal(err)
+	}
+	if dependencyTables != 1 {
+		t.Fatal("migration did not add the requirement dependency table")
 	}
 	var columns int
 	if err := database.QueryRow(`SELECT count(*) FROM pragma_table_info('audit_event') WHERE name IN ('correlation_id','causation_id')`).Scan(&columns); err != nil {
@@ -193,5 +245,125 @@ func TestTaskWithMissingRequirementHasFriendlyError(t *testing.T) {
 	_, err = store.CreateTask(context.Background(), input, "tester")
 	if err == nil || err.Error() != "requirement SWR-MISSING-001@1 does not exist" {
 		t.Fatalf("unexpected missing requirement error: %v", err)
+	}
+}
+
+func TestRequirementDependenciesBlockTaskUntilImplemented(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	prerequisite := requirement("SWR-BASE-001", "software", 1)
+	target := requirement("SWR-TARGET-001", "software", 1)
+	target.Links.DependsOn = []string{"SWR-BASE-001@1"}
+	for _, input := range []domain.RequirementInput{prerequisite, target} {
+		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, err := store.GetRequirement(ctx, domain.RequirementRef{ID: target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Revision.Dependencies) != 1 || stored.Revision.Dependencies[0].ID != prerequisite.ID {
+		t.Fatalf("unexpected dependencies: %+v", stored.Revision.Dependencies)
+	}
+	task := domain.TaskInput{Schema: "task/v1", ID: "T-DEPENDENT", Title: "Implement target", Description: "Implement the target requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-TARGET-001@1", Purpose: "implement"}}}
+	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := store.ListTasks(ctx, "", 20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ready.Items) != 0 {
+		t.Fatalf("blocked task is ready: %+v", ready.Items)
+	}
+	if _, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester"); err == nil || !strings.Contains(err.Error(), "requirement dependencies") {
+		t.Fatalf("unexpected lease error: %v", err)
+	}
+	if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: prerequisite.ID}, "abc123", "code_changed", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ready, err = store.ListTasks(ctx, "", 20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ready.Items) != 1 || ready.Items[0].ID != task.ID {
+		t.Fatalf("implemented prerequisite did not unblock task: %+v", ready.Items)
+	}
+	if _, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequirementRevisionInvalidatesDependencyConsumers(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	base := requirement("SWR-BASE-001", "software", 1)
+	consumer := requirement("SWR-CONSUMER-001", "software", 1)
+	consumer.Links.DependsOn = []string{"SWR-BASE-001@1"}
+	for _, input := range []domain.RequirementInput{base, consumer} {
+		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: input.ID}, "abc123", "code_changed", "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base.Revision = 2
+	if _, err := store.UpdateRequirement(ctx, base, 1, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetRequirement(ctx, domain.RequirementRef{ID: consumer.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReconciliationState != domain.NeedsReconciliation {
+		t.Fatalf("consumer state is %s", stored.ReconciliationState)
+	}
+}
+
+func TestTransitiveRequirementDependenciesBlockTask(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	base := requirement("SWR-BASE-001", "software", 1)
+	middle := requirement("SWR-MIDDLE-001", "software", 1)
+	middle.Links.DependsOn = []string{"SWR-BASE-001@1"}
+	target := requirement("SWR-TARGET-001", "software", 1)
+	target.Links.DependsOn = []string{"SWR-MIDDLE-001@1"}
+	for _, input := range []domain.RequirementInput{base, middle, target} {
+		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{middle.ID} {
+		if _, err := store.ConfirmRequirement(ctx, domain.RequirementRef{ID: id}, "abc123", "code_changed", "tester"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := domain.TaskInput{Schema: "task/v1", ID: "T-TRANSITIVE", Title: "Implement target", Description: "Implement the target requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-TARGET-001@1", Purpose: "implement"}}}
+	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := store.ListTasks(ctx, "", 20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ready.Items) != 0 {
+		t.Fatalf("transitively blocked task is ready: %+v", ready.Items)
 	}
 }

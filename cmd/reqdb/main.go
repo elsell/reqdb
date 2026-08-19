@@ -302,8 +302,15 @@ func task(ctx context.Context, api client.Client, args []string, jsonOutput bool
 }
 
 func lease(ctx context.Context, api client.Client, args []string, jsonOutput bool) error {
+	if len(args) == 0 {
+		return withHelp("a lease action is required", leaseHelp)
+	}
+	if args[0] == "list" {
+		path := "/v1/leases?cursor=" + url.QueryEscape(option(args, "--cursor")) + "&agent=" + url.QueryEscape(option(args, "--agent")) + "&task=" + url.QueryEscape(option(args, "--task"))
+		return call(ctx, api, http.MethodGet, path, nil, jsonOutput)
+	}
 	if len(args) < 2 {
-		return withHelp("a lease action and lease ID are required", leaseHelp)
+		return withHelp("a lease ID is required", leaseHelp)
 	}
 	action, id := args[0], args[1]
 	fence, err := requiredInt(args, "--fence")

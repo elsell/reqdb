@@ -40,6 +40,7 @@ type Store interface {
 	GetTask(context.Context, string) (domain.Task, error)
 	ListTasks(context.Context, string, int, bool) (domain.Page[domain.Task], error)
 	LeaseTask(context.Context, string, string, time.Duration, string) (domain.Lease, error)
+	ListLeases(context.Context, string, int, string, string) (domain.Page[domain.Lease], error)
 	Heartbeat(context.Context, string, int, time.Duration, string) (domain.Lease, error)
 	Release(context.Context, string, int, string) error
 	CompleteTask(context.Context, string, string, int, string, string) (domain.Task, error)

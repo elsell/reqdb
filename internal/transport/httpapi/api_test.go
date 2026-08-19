@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/elsell/reqdb/internal/application"
+	"github.com/elsell/reqdb/internal/domain"
 	"github.com/elsell/reqdb/internal/observability"
 	"github.com/elsell/reqdb/internal/ports"
 	"github.com/elsell/reqdb/internal/store/sqlite"
@@ -93,5 +94,40 @@ func TestEventStreamPublishesChanges(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("change event was not received: %v", scanner.Err())
+	}
+}
+
+func TestListActiveLeases(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	task := domain.TaskInput{Schema: "task/v1", ID: "T-LEASE", Title: "Lease", Description: "Test active lease listing.", Priority: 1}
+	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.LeaseTask(ctx, task.ID, "agent-a", time.Minute, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httpapi.API{Service: application.Service{Store: store, Auth: application.AllowAll{}}}
+	server := httptest.NewServer(api.Handler())
+	t.Cleanup(server.Close)
+
+	response, err := http.Get(server.URL + "/v1/leases?agent=agent-a&task=T-LEASE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var result struct {
+		Data []domain.Lease `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(result.Data) != 1 || result.Data[0].LeaseID != lease.LeaseID {
+		t.Fatalf("unexpected lease list: status=%d data=%+v", response.StatusCode, result.Data)
 	}
 }

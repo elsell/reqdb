@@ -42,6 +42,8 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 	case len(parts) >= 2 && parts[1] == "leases" && parts[len(parts)-1] == "release":
 		fmt.Println("Lease released.")
 		return nil
+	case path == "v1/leases" && method == http.MethodGet:
+		return printLeaseList(data)
 	case len(parts) >= 2 && parts[1] == "leases":
 		return printLease(data)
 	case len(parts) >= 2 && parts[1] == "audit":
@@ -83,6 +85,7 @@ func printRequirement(data json.RawMessage) error {
 	fmt.Fprintf(fields, "Level:\t%s\n", item.Revision.Level)
 	fmt.Fprintf(fields, "Reconciliation:\t%s\n", item.ReconciliationState)
 	fmt.Fprintf(fields, "Refines:\t%s\n", parentList(item.Revision.Parents))
+	fmt.Fprintf(fields, "Depends on:\t%s\n", parentList(item.Revision.Dependencies))
 	fmt.Fprintf(fields, "Created:\t%s\n", displayTime(item.Revision.CreatedAt))
 	fmt.Fprintf(fields, "Actor:\t%s\n", item.Revision.ActorID)
 	if err := fields.Flush(); err != nil {
@@ -144,7 +147,25 @@ func printRequirementTree(data json.RawMessage) error {
 	for _, root := range roots {
 		printTreeNode(table, root, "", true, true, children, tasks, map[string]bool{})
 	}
-	return table.Flush()
+	if err := table.Flush(); err != nil {
+		return err
+	}
+	hasDependencies := false
+	for _, item := range items {
+		hasDependencies = hasDependencies || len(item.Revision.Dependencies) > 0
+	}
+	if hasDependencies {
+		fmt.Println("\nDependency links:")
+		links := newTable()
+		fmt.Fprintln(links, "REQUIREMENT\tDEPENDS ON")
+		for _, item := range items {
+			for _, dependency := range item.Revision.Dependencies {
+				fmt.Fprintf(links, "%s@%d\t%s@%d\n", item.ID, item.Revision.Revision, dependency.ID, dependency.Revision)
+			}
+		}
+		return links.Flush()
+	}
+	return nil
 }
 
 func printTreeNode(writer *tabwriter.Writer, item domain.Requirement, prefix string, last, root bool, children map[string][]domain.Requirement, tasks map[string][]domain.Task, path map[string]bool) {
@@ -263,6 +284,23 @@ func printLease(data json.RawMessage) error {
 	fmt.Fprintf(fields, "Claimed:\t%s\n", displayTime(item.ClaimedAt))
 	fmt.Fprintf(fields, "Expires:\t%s\n", displayTime(item.ExpiresAt))
 	return fields.Flush()
+}
+
+func printLeaseList(data json.RawMessage) error {
+	var items []domain.Lease
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		fmt.Println("No active leases found.")
+		return nil
+	}
+	table := newTable()
+	fmt.Fprintln(table, "LEASE\tTASK\tAGENT\tFENCE\tCLAIMED\tEXPIRES")
+	for _, item := range items {
+		fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%s\t%s\n", item.LeaseID, item.TaskID, item.AgentID, item.Fence, displayTime(item.ClaimedAt), displayTime(item.ExpiresAt))
+	}
+	return table.Flush()
 }
 
 func printAudit(data json.RawMessage) error {

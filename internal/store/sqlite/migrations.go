@@ -9,6 +9,7 @@ import (
 )
 
 const requestIDsMigrationID = "202608180001"
+const requirementDependencyMigrationID = "202608180002"
 
 type migrationRecord struct {
 	ID string `gorm:"column:id;primaryKey;size:255"`
@@ -63,6 +64,15 @@ BEFORE DELETE ON audit_event
 BEGIN
     SELECT RAISE(ABORT, 'audit event is append-only');
 END`).Error
+			},
+		},
+		{
+			ID: requirementDependencyMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(dbschema.RequirementDependencyMigration).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable("requirement_dependency")
 			},
 		},
 	}

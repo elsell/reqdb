@@ -9,20 +9,18 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1>reqdb</h1>
-      <p>Requirements and implementation work</p>
-    </div>
+    <h1>reqdb</h1>
+    <span class="workspace-title">Requirements database</span>
     <div class="connection" aria-live="polite">
       <span id="connection-dot" class="connection-dot"></span>
       <span id="connection-text">Connecting</span>
     </div>
   </header>
 
-  <main>
+  <main class="workspace">
     <section class="toolbar" aria-label="Tree controls">
       <label class="search">
-        <span>Filter</span>
+        <span>Filter:</span>
         <input id="filter" type="search" placeholder="ID, title, state, or text" autocomplete="off">
       </label>
       <button id="refresh" type="button">Refresh</button>
@@ -32,13 +30,10 @@
     <section id="summary" class="summary" aria-label="Summary"></section>
     <div id="error" class="error" role="alert" hidden></div>
 
-    <div class="trees">
+    <div class="modules">
       <section class="panel">
         <div class="panel-heading">
-          <div>
-            <h2>Requirement tree</h2>
-            <p>Business intent through software behavior</p>
-          </div>
+          <h2>Requirements</h2>
           <span id="requirement-count" class="count">0</span>
         </div>
         <div id="requirements" class="tree loading">Loading requirements…</div>
@@ -46,10 +41,7 @@
 
       <section class="panel">
         <div class="panel-heading">
-          <div>
-            <h2>Task tree</h2>
-            <p>Work ordered by task dependencies</p>
-          </div>
+          <h2>Tasks</h2>
           <span id="task-count" class="count">0</span>
         </div>
         <div id="tasks" class="tree loading">Loading tasks…</div>

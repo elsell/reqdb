@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elsell/reqdb/internal/domain"
 )
@@ -74,5 +75,26 @@ func TestTraceShowsLinkedTask(t *testing.T) {
 	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/SWR-TEST-001", data) })
 	if !strings.Contains(output, "└── T-1") {
 		t.Fatalf("trace does not contain its linked task: %s", output)
+	}
+}
+
+func TestLeaseListUsesTable(t *testing.T) {
+	lease := domain.Lease{LeaseID: "L-1", TaskID: "T-1", AgentID: "agent-a", Fence: 2, ClaimedAt: time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC), ExpiresAt: time.Date(2026, 8, 18, 12, 30, 0, 0, time.UTC)}
+	data, _ := json.Marshal([]domain.Lease{lease})
+	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/leases?agent=agent-a", data) })
+	if !strings.Contains(output, "LEASE") || !strings.Contains(output, "L-1") || !strings.Contains(output, "agent-a") {
+		t.Fatalf("lease list is not a table: %s", output)
+	}
+}
+
+func TestTraceShowsDependencyLinksSeparately(t *testing.T) {
+	base := domain.Requirement{ID: "SWR-BASE-001", CurrentRevision: 1, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Base"}}
+	target := domain.Requirement{ID: "SWR-TARGET-001", CurrentRevision: 1, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Target", Dependencies: []domain.RequirementRef{{ID: base.ID, Revision: 1}}}}
+	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{base, target}})
+	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace", data) })
+	for _, value := range []string{"Dependency links:", "REQUIREMENT", "DEPENDS ON", "SWR-TARGET-001@1", "SWR-BASE-001@1"} {
+		if !strings.Contains(output, value) {
+			t.Fatalf("trace does not contain %q: %s", value, output)
+		}
 	}
 }

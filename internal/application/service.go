@@ -244,6 +244,12 @@ func (service Service) LeaseTask(ctx context.Context, id, agent string, ttl time
 	}
 	return lease, err
 }
+func (service Service) ListLeases(ctx context.Context, cursor string, limit int, agent, task, actor string) (domain.Page[domain.Lease], error) {
+	if err := service.authorize(ctx, actor, "lease.read", ""); err != nil {
+		return domain.Page[domain.Lease]{}, err
+	}
+	return service.Store.ListLeases(ctx, cursor, limit, agent, task)
+}
 func (service Service) Heartbeat(ctx context.Context, id string, fence int, ttl time.Duration, actor string) (domain.Lease, error) {
 	if err := service.authorize(ctx, actor, "lease.heartbeat", id); err != nil {
 		return domain.Lease{}, err
@@ -303,6 +309,13 @@ func Render(requirements []domain.Requirement) string {
 			fmt.Fprint(&text, "- Refines:")
 			for _, parent := range item.Revision.Parents {
 				fmt.Fprintf(&text, " `%s@%d`", parent.ID, parent.Revision)
+			}
+			fmt.Fprintln(&text)
+		}
+		if len(item.Revision.Dependencies) > 0 {
+			fmt.Fprint(&text, "- Depends on:")
+			for _, dependency := range item.Revision.Dependencies {
+				fmt.Fprintf(&text, " `%s@%d`", dependency.ID, dependency.Revision)
 			}
 			fmt.Fprintln(&text)
 		}

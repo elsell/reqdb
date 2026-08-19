@@ -38,6 +38,10 @@ Each non-business requirement shall refine one or more requirements at the
 immediate parent level. Each link shall name a parent revision. The refinement
 graph shall be acyclic.
 
+A requirement can depend on other requirement revisions. `refines` shall
+describe the requirement hierarchy. `depends_on` shall describe implementation
+order. These links shall be separate. The dependency graph shall be acyclic.
+
 An input requirement shall have one objectively verifiable obligation. Its
 statement shall contain one lowercase `shall`.
 
@@ -60,7 +64,7 @@ code.
 | `unimplemented` | No accepted implementation exists. |
 | `in_progress` | An active task implements or reconciles the requirement. |
 | `implemented` | A confirmation states that the code matches the requirement revision. |
-| `needs_reconciliation` | The requirement or one of its ancestors changed after confirmation. |
+| `needs_reconciliation` | An upstream requirement changed after confirmation. |
 
 A confirmation shall name the requirement revision, Git commit, actor, time,
 and result. The result shall state that code changed or that existing code was
@@ -72,10 +76,11 @@ may refer to the task and pull request that produced the result.
 When a requirement gets a new revision, the server shall:
 
 1. Set the requirement to `unimplemented`.
-2. Find all transitive descendants.
-3. Set each descendant to `needs_reconciliation`.
-4. Record the changed ancestor as an unresolved cause for each affected
-   descendant.
+2. Find all transitive downstream requirements through refinement and
+   dependency links.
+3. Set each downstream requirement to `needs_reconciliation`.
+4. Record the changed requirement as an unresolved cause for each affected
+   requirement.
 
 An active implementation or reconciliation task may set an unimplemented or
 affected requirement to `in_progress`. A confirmation shall resolve the known
@@ -87,12 +92,24 @@ A task shall have a title, description, priority, state, requirement links,
 and task dependencies. A requirement link shall have the purpose `implement`
 or `reconcile`.
 
-A task is ready when it is open, has no active lease, and all its dependencies
-are complete. Ready tasks shall sort by descending priority and then by ID.
+A task is ready when all these conditions are true:
+
+- The task is open.
+- The task has no active lease.
+- All task dependencies are complete.
+- All transitive dependencies of its linked requirements are current and
+  `implemented`.
+
+The lease operation shall check the same conditions in its transaction. Ready
+tasks shall sort by descending priority and then by ID.
 
 A claim shall create one lease in one transaction. A lease shall identify the
 task, agent, fence, claim time, and expiry time. Claim, heartbeat, release, and
 completion operations shall use the current lease and fence.
+
+The server shall list active leases in ascending lease ID order. The list shall
+support cursor pagination and optional agent and task filters. Expired leases
+shall not appear. Their history shall remain available in the audit log.
 
 A completed task shall record its Git commit. A task can link to zero or more
 pull requests. A pull request can link to more than one task.
@@ -146,6 +163,7 @@ The core resource commands are:
 | `task lease ID --agent ID` | Lease one task. |
 | `task complete ID --lease ID --fence N --commit SHA` | Complete one task. |
 | `task link-pr ID --url URL` | Link a task to a pull request. |
+| `lease list [--agent ID] [--task ID]` | List active leases. |
 | `lease heartbeat ID --fence N` | Extend one lease. |
 | `lease release ID --fence N` | Release one lease. |
 
@@ -154,8 +172,8 @@ Server-wide and graph-wide operations shall remain top-level commands:
 | Command | Result |
 |---|---|
 | `serve` | Own the SQLite database and serve clients. |
-| `trace [REQUIREMENT]` | Show the requirement hierarchy. |
-| `impact REQUIREMENT` | Show affected requirements and tasks. |
+| `trace [REQUIREMENT]` | Show the refinement hierarchy and separate dependency links. |
+| `impact REQUIREMENT` | Follow refinement and dependency links to show affected requirements and tasks. |
 | `audit [ENTITY]` | List audit events. |
 | `render [OPTIONS]` | Generate requirement and reconciliation views. |
 

@@ -367,6 +367,15 @@ func (api API) tasks(w http.ResponseWriter, r *http.Request, parts []string) {
 }
 
 func (api API) leases(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) == 0 && r.Method == http.MethodGet {
+		page, err := api.Service.ListLeases(r.Context(), r.URL.Query().Get("cursor"), limit(r), r.URL.Query().Get("agent"), r.URL.Query().Get("task"), actor(r))
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		write(w, r, http.StatusOK, page.Items, page.NextCursor)
+		return
+	}
 	if len(parts) != 2 || r.Method != http.MethodPost {
 		fail(w, r, domain.ErrNotFound)
 		return

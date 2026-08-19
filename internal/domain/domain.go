@@ -45,7 +45,8 @@ type RequirementInput struct {
 	Title     string `json:"title" yaml:"title"`
 	Statement string `json:"statement" yaml:"statement"`
 	Links     struct {
-		Refines []string `json:"refines" yaml:"refines"`
+		Refines   []string `json:"refines" yaml:"refines"`
+		DependsOn []string `json:"depends_on" yaml:"depends_on"`
 	} `json:"links" yaml:"links"`
 }
 
@@ -63,6 +64,7 @@ type RequirementRevision struct {
 	Title         string           `json:"title"`
 	Statement     string           `json:"statement"`
 	Parents       []RequirementRef `json:"parents"`
+	Dependencies  []RequirementRef `json:"dependencies"`
 	CreatedAt     time.Time        `json:"created_at"`
 	ActorID       string           `json:"actor_id"`
 }
@@ -102,6 +104,15 @@ func (input RequirementInput) Validate() error {
 		ref, err := ParseRequirementRef(value)
 		if err != nil || !strings.HasPrefix(ref.ID, parentPrefixes[input.Level]) {
 			return errors.New("parent requirement has the wrong level or format")
+		}
+	}
+	for _, value := range input.Links.DependsOn {
+		ref, err := ParseRequirementRef(value)
+		if err != nil {
+			return err
+		}
+		if ref.ID == input.ID {
+			return errors.New("a requirement cannot depend on itself")
 		}
 	}
 	return nil

@@ -68,9 +68,10 @@ Use "reqdb task ACTION --help" for action options.
 const leaseHelp = `Maintain a task lease.
 
 Usage:
-  reqdb lease ACTION LEASE [options]
+  reqdb lease ACTION [LEASE] [options]
 
 Actions:
+  list        List active leases
   heartbeat   Extend a lease
   release     Release a lease
 
@@ -184,6 +185,16 @@ Usage:
 
 Usage:
   reqdb lease heartbeat LEASE --fence NUMBER [--ttl DURATION] [options]
+`,
+	"lease list": `List active leases.
+
+Usage:
+  reqdb lease list [options]
+
+Options:
+  --cursor ID   Continue after a lease ID
+  --agent ID    Show leases held by one agent
+  --task ID     Show the lease for one task
 `,
 	"lease release": `Release an active lease.
 
