@@ -23,30 +23,24 @@
         <span>Filter:</span>
         <input id="filter" type="search" placeholder="ID, title, state, or text" autocomplete="off">
       </label>
+      <button id="expand-all" type="button">Expand all</button>
+      <button id="collapse-all" type="button">Collapse all</button>
       <button id="refresh" type="button">Refresh</button>
       <span id="updated" class="updated">Not loaded</span>
     </section>
 
-    <section id="summary" class="summary" aria-label="Summary"></section>
     <div id="error" class="error" role="alert" hidden></div>
-
-    <div class="modules">
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Requirements</h2>
-          <span id="requirement-count" class="count">0</span>
-        </div>
-        <div id="requirements" class="tree loading">Loading requirements…</div>
+    <div class="content">
+      <section class="explorer-panel" aria-label="Requirements and tasks">
+        <div class="pane-heading">Requirement and Task Explorer</div>
+        <div id="explorer" class="tree loading">Loading…</div>
       </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Tasks</h2>
-          <span id="task-count" class="count">0</span>
-        </div>
-        <div id="tasks" class="tree loading">Loading tasks…</div>
+      <section class="detail-panel" aria-label="Selected item details">
+        <div class="pane-heading">Details</div>
+        <div id="details" class="details empty">Select a requirement or task.</div>
       </section>
     </div>
+    <section id="summary" class="summary" aria-label="Summary"></section>
   </main>
 </body>
 </html>
