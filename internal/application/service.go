@@ -177,19 +177,27 @@ func (service Service) ListReadyRequirements(ctx context.Context, cursor string,
 	}
 	return service.Store.ListReadyRequirements(ctx, cursor, limit)
 }
-func (service Service) ConfirmRequirement(ctx context.Context, input domain.ConfirmationInput, actor string) (domain.Requirement, error) {
-	if err := service.authorize(ctx, actor, "requirement.confirm", input.Requirement.ID); err != nil {
+func (service Service) ReviewRequirement(ctx context.Context, input domain.ReviewInput, actor string) (domain.Requirement, error) {
+	if err := service.authorize(ctx, actor, "requirement.review", input.Requirement.ID); err != nil {
 		return domain.Requirement{}, err
 	}
 	if err := domain.ValidateCommit(input.Commit); err != nil {
 		return domain.Requirement{}, err
 	}
-	if input.PullRequest != nil && (input.PullRequest.Repository == "" || input.PullRequest.URL == "" || input.PullRequest.Number < 1) {
-		return domain.Requirement{}, errors.New("pull request repository, number, and URL are required")
+	if input.Verdict != "accept" && input.Verdict != "reject" {
+		return domain.Requirement{}, errors.New("verdict must be accept or reject")
 	}
-	item, err := service.Store.ConfirmRequirement(ctx, input, actor)
-	if err == nil {
-		service.event(ctx, "requirement.implemented", map[string]any{"requirement_id": input.Requirement.ID, "commit": input.Commit})
+	if input.Verdict == "reject" && len(input.Findings) == 0 {
+		return domain.Requirement{}, errors.New("a rejected review requires at least one finding")
+	}
+	for _, finding := range input.Findings {
+		if strings.TrimSpace(finding.Message) == "" || finding.Line < 0 || (finding.Line > 0 && strings.TrimSpace(finding.Path) == "") {
+			return domain.Requirement{}, errors.New("each finding requires a message; a line requires a path")
+		}
+	}
+	item, created, err := service.Store.ReviewRequirement(ctx, input, actor)
+	if err == nil && created {
+		service.event(ctx, "requirement.reviewed", map[string]any{"requirement_id": input.Requirement.ID, "commit": input.Commit, "verdict": input.Verdict})
 	}
 	return item, err
 }

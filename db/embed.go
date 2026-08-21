@@ -22,3 +22,8 @@ var RequirementLifecycleMigration string
 //
 //go:embed workflow_state.sql
 var WorkflowStateMigration string
+
+// ReviewMigration replaces confirmations with reviews and satisfaction terms.
+//
+//go:embed review.sql
+var ReviewMigration string

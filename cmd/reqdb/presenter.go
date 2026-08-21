@@ -112,16 +112,19 @@ func printRequirement(data json.RawMessage) error {
 		_ = table.Flush()
 	}
 	printStateHistory(item.StateHistory)
-	if len(item.Confirmations) > 0 {
-		fmt.Println("\nConfirmation history:")
+	if len(item.Reviews) > 0 {
+		fmt.Println("\nReview history:")
 		table := newTable()
-		fmt.Fprintln(table, "TIME\tRESULT\tCOMMIT\tTASK\tPULL REQUEST\tACTOR")
-		for _, confirmation := range item.Confirmations {
-			pr := ""
-			if confirmation.PullRequest != nil {
-				pr = confirmation.PullRequest.URL
+		fmt.Fprintln(table, "ID\tTIME\tVERDICT\tCOMMIT\tTASK\tREVIEWER")
+		for _, review := range item.Reviews {
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", review.ID, displayTime(review.ReviewedAt), review.Verdict, review.Commit, review.TaskID, review.ReviewerID)
+			for _, finding := range review.Findings {
+				location := finding.Path
+				if finding.Line > 0 {
+					location = fmt.Sprintf("%s:%d", finding.Path, finding.Line)
+				}
+				fmt.Fprintf(table, "\t\tFinding\t%s\t%s\t\n", finding.Message, location)
 			}
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", displayTime(confirmation.ConfirmedAt), confirmation.Result, confirmation.Commit, confirmation.TaskID, pr, confirmation.ActorID)
 		}
 		_ = table.Flush()
 	}
@@ -300,8 +303,8 @@ var traceLevelColors = map[string]string{
 }
 
 var traceStateColors = map[string]string{
-	"implemented":          "30;42",
-	"unimplemented":        "97;100",
+	"satisfied":            "30;42",
+	"not_satisfied":        "97;100",
 	"in_progress":          "97;44",
 	"ready_for_review":     "30;43",
 	"needs_reconciliation": "97;41",

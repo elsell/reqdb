@@ -61,7 +61,7 @@ function headerCell(label, definition) {
 }
 
 function statusIcon(value) {
-  if (value === "implemented" || value === "complete") return "check";
+  if (value === "satisfied" || value === "complete") return "check";
   if (value === "needs_reconciliation" || value === "blocked") return "warning";
   if (value === "ready_for_review") return "review";
   if (value === "ready") return "ready";
@@ -78,7 +78,7 @@ function statusChip(value, label) {
 
 function actionIcon(label) {
   if (label.startsWith("Copy")) return "copy";
-  if (label.startsWith("Confirm") || label.startsWith("Complete")) return "check";
+  if (label.startsWith("Review") || label.startsWith("Complete")) return "check";
   if (label.startsWith("Retire") || label.startsWith("Release")) return "retired";
   if (label.startsWith("Lease")) return "lease";
   if (label.startsWith("Link")) return "link";
@@ -148,7 +148,7 @@ function matches(values) { return !state.filter || values.join(" ").toLowerCase(
 function statusMatches(type, item) {
   switch (state.statusFilter) {
   case "requirements": return type === "requirement";
-  case "implemented": return type === "requirement" && item.reconciliation_state === "implemented";
+  case "satisfied": return type === "requirement" && item.reconciliation_state === "satisfied";
   case "retired": return type === "requirement" && item.lifecycle_state === "retired";
   case "needs_reconciliation": return type === "requirement" && item.reconciliation_state === "needs_reconciliation";
   case "open_tasks": return type === "task" && item.state === "open";
@@ -279,12 +279,12 @@ function groupNode(key, title, count, roots, children, values, describe, type, r
   const collapsed = state.collapsedGroups.has(key) && !filterActive();
   const wrapper = element("div", "tree-node");
   const complete = type === "requirement"
-    ? state.requirements.filter(item => item.reconciliation_state === "implemented").length
+    ? state.requirements.filter(item => item.reconciliation_state === "satisfied").length
     : state.tasks.filter(item => item.state === "complete").length;
   wrapper.append(nodeRow({
     title: `${title} (${count})`, group: true, depth: 0, hasChildren: roots.length > 0, collapsed,
-    stateValue: complete === count && count > 0 ? (type === "requirement" ? "implemented" : "complete") : "in_progress",
-    stateLabel: `${complete}/${count} ${type === "requirement" ? "implemented" : "complete"}`,
+    stateValue: complete === count && count > 0 ? (type === "requirement" ? "satisfied" : "complete") : "in_progress",
+    stateLabel: `${complete}/${count} ${type === "requirement" ? "satisfied" : "complete"}`,
     toggle: () => { collapsed ? state.collapsedGroups.delete(key) : state.collapsedGroups.add(key); render(); },
   }));
   if (!collapsed) {
@@ -318,27 +318,21 @@ function renderExplorer() {
   describeRequirement = item => {
     const actions = [{ label: "Copy ID", run: () => copy(`${item.id}@${item.current_revision}`) }];
     if (item.lifecycle_state !== "retired") {
-      actions.push({ label: "Confirm implementation…", run: () => {
+      actions.push({ label: "Review…", run: () => {
         const commit = window.prompt(`Git commit for ${item.id}@${item.current_revision}:`);
         if (!commit) return;
-        const result = window.prompt("Result: code_changed or existing_code_confirmed", "code_changed");
-        if (!result) return;
+        const verdict = window.prompt("Verdict: accept or reject", "accept");
+        if (!verdict) return;
         const taskId = window.prompt("Completed task ID (optional):", "") || "";
-        const raw = window.prompt("Pull request URL (optional):", "") || "";
-        let pullRequest;
-        if (raw) {
-          try {
-            const url = new URL(raw);
-            const parts = url.pathname.split("/").filter(Boolean);
-            if (parts.length < 4 || parts.at(-2) !== "pull" || !Number(parts.at(-1))) throw new Error("Pull request URL is invalid.");
-            pullRequest = { repository: `${url.host}/${parts[0]}/${parts[1]}`, number: Number(parts.at(-1)), url: raw };
-          } catch (error) {
-            elements.error.textContent = error.message;
-            elements.error.hidden = false;
-            return;
-          }
+        const findings = [];
+        if (verdict === "reject") {
+          const message = window.prompt("Finding:");
+          if (!message) return;
+          const path = window.prompt("Path (optional):", "") || "";
+          const line = path ? Number(window.prompt("Line (optional):", "0") || "0") : 0;
+          findings.push({ message, path, line });
         }
-        mutate(`/v1/requirements/${encodeURIComponent(item.id)}/confirm`, { commit, result, task_id: taskId, pull_request: pullRequest });
+        mutate(`/v1/requirements/${encodeURIComponent(item.id)}/reviews`, { commit, verdict, task_id: taskId, findings });
       } });
       actions.push({ label: "Retire…", run: () => {
         if (window.confirm(`Retire requirement ${item.id}?`)) mutate(`/v1/requirements/${encodeURIComponent(item.id)}/retire`, {});
@@ -519,7 +513,10 @@ function renderDetails() {
       elements.details.append(detailItems("Readiness", item.readiness.ready ? ["Ready"] : item.readiness.blockers));
       elements.details.append(detailItems("Revision history", (item.revision_history || []).map(value => `Revision ${value.revision}: ${value.title} — ${new Date(value.created_at).toLocaleString()} — ${value.actor_id}`)));
       elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.field}: ${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
-      elements.details.append(detailItems("Confirmations", (item.confirmations || []).map(value => `${value.result} — ${value.commit}${value.task_id ? ` — ${value.task_id}` : ""}${value.pull_request ? ` — ${value.pull_request.url}` : ""}`)));
+      elements.details.append(detailItems("Reviews", (item.reviews || []).flatMap(value => [
+        `${value.id}: ${value.verdict} — ${value.commit}${value.task_id ? ` — ${value.task_id}` : ""}`,
+        ...(value.findings || []).map(finding => `Finding: ${finding.message}${finding.path ? ` — ${finding.path}${finding.line ? `:${finding.line}` : ""}` : ""}`),
+      ])));
       elements.details.append(detailItems("Open causes", (item.open_causes || []).map(value => `${value.requirement.id}@${value.requirement.revision}`)));
     }
     return;
@@ -670,7 +667,7 @@ function renderEvents() {
 function renderSummary() {
   const values = [
     [state.requirements.length, "requirements", "requirement", "requirements"],
-    [state.requirements.filter(item => item.reconciliation_state === "implemented").length, "implemented", "check", "implemented"],
+    [state.requirements.filter(item => item.reconciliation_state === "satisfied").length, "satisfied", "check", "satisfied"],
     [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired", "retired", "retired"],
     [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation", "warning", "needs_reconciliation"],
     [state.tasks.filter(item => item.state === "open").length, "open tasks", "pending", "open_tasks"],

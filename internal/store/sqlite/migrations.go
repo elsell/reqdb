@@ -12,6 +12,7 @@ const requestIDsMigrationID = "202608180001"
 const requirementDependencyMigrationID = "202608180002"
 const requirementLifecycleMigrationID = "202608180003"
 const workflowStateMigrationID = "202608190001"
+const reviewMigrationID = "202608210001"
 
 type migrationRecord struct {
 	ID string `gorm:"column:id;primaryKey;size:255"`
@@ -118,6 +119,12 @@ END`).Error
 				return tx.Exec(dbschema.WorkflowStateMigration).Error
 			},
 		},
+		{
+			ID: reviewMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(dbschema.ReviewMigration).Error
+			},
+		},
 	}
 }
 
@@ -152,6 +159,11 @@ func baselineLegacyDatabase(database *gorm.DB) error {
 	if database.Migrator().HasTable("state_history") {
 		if err := database.Create(&migrationRecord{ID: workflowStateMigrationID}).Error; err != nil {
 			return fmt.Errorf("record workflow state migration baseline: %w", err)
+		}
+	}
+	if database.Migrator().HasTable("requirement_review") {
+		if err := database.Create(&migrationRecord{ID: reviewMigrationID}).Error; err != nil {
+			return fmt.Errorf("record review migration baseline: %w", err)
 		}
 	}
 	return nil

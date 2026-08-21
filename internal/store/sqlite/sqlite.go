@@ -266,7 +266,7 @@ func addRevision(tx *gorm.DB, input domain.RequirementInput, actor string) error
 func (store *Store) CreateRequirement(ctx context.Context, input domain.RequirementInput, actor string) (domain.Requirement, error) {
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		stamp := now()
-		if err := tx.Create(&requirementRow{ID: input.ID, CurrentRevision: input.Revision, LifecycleState: string(domain.Active), ReconciliationState: string(domain.Unimplemented), CreatedAt: stamp, UpdatedAt: stamp}).Error; err != nil {
+		if err := tx.Create(&requirementRow{ID: input.ID, CurrentRevision: input.Revision, LifecycleState: string(domain.Active), ReconciliationState: string(domain.NotSatisfied), CreatedAt: stamp, UpdatedAt: stamp}).Error; err != nil {
 			return friendlyConflict{message: fmt.Sprintf("requirement %s already exists", input.ID)}
 		}
 		if err := addRevision(tx, input, actor); err != nil {
@@ -275,7 +275,7 @@ func (store *Store) CreateRequirement(ctx context.Context, input domain.Requirem
 		if err := recordState(tx, "requirement", input.ID, "lifecycle", "", string(domain.Active), actor); err != nil {
 			return err
 		}
-		if err := recordState(tx, "requirement", input.ID, "reconciliation", "", string(domain.Unimplemented), actor); err != nil {
+		if err := recordState(tx, "requirement", input.ID, "reconciliation", "", string(domain.NotSatisfied), actor); err != nil {
 			return err
 		}
 		return audit(ctx, tx, actor, "requirement.created", "requirement", input.ID, map[string]any{"revision": input.Revision})
@@ -312,10 +312,10 @@ func (store *Store) UpdateRequirement(ctx context.Context, input domain.Requirem
 			return err
 		}
 		previousState := current.ReconciliationState
-		if err := tx.Model(&requirementRow{}).Where("id=? AND current_revision=?", input.ID, expected).Updates(map[string]any{"current_revision": input.Revision, "reconciliation_state": string(domain.Unimplemented), "updated_at": now()}).Error; err != nil {
+		if err := tx.Model(&requirementRow{}).Where("id=? AND current_revision=?", input.ID, expected).Updates(map[string]any{"current_revision": input.Revision, "reconciliation_state": string(domain.NotSatisfied), "updated_at": now()}).Error; err != nil {
 			return err
 		}
-		if err := recordState(tx, "requirement", input.ID, "reconciliation", previousState, string(domain.Unimplemented), actor); err != nil {
+		if err := recordState(tx, "requirement", input.ID, "reconciliation", previousState, string(domain.NotSatisfied), actor); err != nil {
 			return err
 		}
 		type descendant struct {
@@ -409,7 +409,7 @@ func (store *Store) getRequirement(ctx context.Context, ref domain.RequirementRe
 		}
 		item.StateHistory = filtered
 	}
-	item.Confirmations, err = store.confirmations(ctx, ref.ID)
+	item.Reviews, err = store.reviews(ctx, ref.ID)
 	if err != nil {
 		return domain.Requirement{}, err
 	}
@@ -464,14 +464,14 @@ WHERE NOT EXISTS (
    AND child.lifecycle_state='active'
   WHERE rr.parent_id=current.id AND rr.parent_revision=current.revision
 )
-AND current.reconciliation_state!='implemented'`
+AND current.reconciliation_state!='satisfied'`
 	if err := database.Raw(query, id, revision).Scan(&incompleteLeaves).Error; err != nil {
 		return "", err
 	}
 	if incompleteLeaves == 0 {
-		return domain.Implemented, nil
+		return domain.Satisfied, nil
 	}
-	return domain.Unimplemented, nil
+	return domain.NotSatisfied, nil
 }
 
 func (store *Store) loadRequirementRevision(ctx context.Context, ref domain.RequirementRef) (domain.RequirementRevision, error) {
@@ -580,26 +580,22 @@ func (store *Store) stateHistory(ctx context.Context, entityType, entityID strin
 	return items, nil
 }
 
-func (store *Store) confirmations(ctx context.Context, requirementID string) ([]domain.Confirmation, error) {
+func (store *Store) reviews(ctx context.Context, requirementID string) ([]domain.Review, error) {
 	type row struct {
-		Result, CommitSHA, TaskID, ConfirmedAt, ActorID string
-		Repository, URL                                 *string
-		Number                                          *int
+		ID, Verdict, CommitSHA, TaskID, ReviewedAt, ReviewerID string
 	}
 	var rows []row
-	query := `SELECT c.result,c.commit_sha,COALESCE(c.task_id,'') AS task_id,c.confirmed_at,c.actor_id,
-p.repository,p.number,p.url FROM reconciliation_confirmation c
-LEFT JOIN pull_request p ON p.id=c.pull_request_id
-WHERE c.requirement_id=? ORDER BY c.confirmed_at,c.id`
+	query := `SELECT id,verdict,commit_sha,COALESCE(task_id,'') AS task_id,reviewed_at,reviewer_id
+FROM requirement_review WHERE requirement_id=? ORDER BY reviewed_at,id`
 	if err := store.db.WithContext(ctx).Raw(query, requirementID).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	items := make([]domain.Confirmation, 0, len(rows))
+	items := make([]domain.Review, 0, len(rows))
 	for _, row := range rows {
-		confirmed, _ := time.Parse(time.RFC3339Nano, row.ConfirmedAt)
-		item := domain.Confirmation{Result: row.Result, Commit: row.CommitSHA, TaskID: row.TaskID, ConfirmedAt: confirmed, ActorID: row.ActorID}
-		if row.Repository != nil && row.Number != nil && row.URL != nil {
-			item.PullRequest = &domain.PullRequest{Repository: *row.Repository, Number: *row.Number, URL: *row.URL}
+		reviewed, _ := time.Parse(time.RFC3339Nano, row.ReviewedAt)
+		item := domain.Review{ID: row.ID, Verdict: row.Verdict, Commit: row.CommitSHA, TaskID: row.TaskID, ReviewedAt: reviewed, ReviewerID: row.ReviewerID}
+		if err := store.db.WithContext(ctx).Raw(`SELECT message,path,line FROM review_finding WHERE review_id=? ORDER BY ordinal`, row.ID).Scan(&item.Findings).Error; err != nil {
+			return nil, err
 		}
 		items = append(items, item)
 	}
@@ -639,7 +635,7 @@ func (store *Store) requirementReadiness(ctx context.Context, item domain.Requir
 	if hasChildren {
 		blockers = append(blockers, "requirement is not a leaf")
 	}
-	if item.ReconciliationState != domain.Unimplemented && item.ReconciliationState != domain.NeedsReconciliation {
+	if item.ReconciliationState != domain.NotSatisfied && item.ReconciliationState != domain.NeedsReconciliation {
 		blockers = append(blockers, fmt.Sprintf("reconciliation state is %s", item.ReconciliationState))
 	}
 	var taskIDs []string
@@ -677,15 +673,16 @@ UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency
 			blockers = append(blockers, fmt.Sprintf("%s is stale; current revision is %d", ref, dependency.CurrentRevision))
 		case dependency.LifecycleState != string(domain.Active):
 			blockers = append(blockers, ref+" is retired")
-		case effectiveState != domain.Implemented:
+		case effectiveState != domain.Satisfied:
 			blockers = append(blockers, fmt.Sprintf("%s is %s", ref, effectiveState))
 		}
 	}
 	return domain.Readiness{Ready: len(blockers) == 0, Blockers: blockers}, nil
 }
 
-func (store *Store) ConfirmRequirement(ctx context.Context, input domain.ConfirmationInput, actor string) (domain.Requirement, error) {
+func (store *Store) ReviewRequirement(ctx context.Context, input domain.ReviewInput, actor string) (domain.Requirement, bool, error) {
 	ref := input.Requirement
+	created := false
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root requirementRow
 		if err := tx.First(&root, "id=?", ref.ID).Error; err != nil {
@@ -705,14 +702,28 @@ func (store *Store) ConfirmRequirement(ctx context.Context, input domain.Confirm
 			return err
 		}
 		if hasChildren {
-			return friendlyConflict{message: fmt.Sprintf("requirement %s@%d is not a leaf; confirm its refinement children", ref.ID, ref.Revision)}
+			return friendlyConflict{message: fmt.Sprintf("requirement %s@%d is not a leaf; review its refinement children", ref.ID, ref.Revision)}
 		}
-		if input.Result == "" {
-			input.Result = "code_changed"
+
+		type priorReview struct{ ID, Verdict, TaskID string }
+		var prior priorReview
+		if err := tx.Raw(`SELECT id,verdict,COALESCE(task_id,'') AS task_id FROM requirement_review WHERE requirement_id=? AND requirement_revision=? AND commit_sha=?`, ref.ID, ref.Revision, input.Commit).Scan(&prior).Error; err != nil {
+			return err
 		}
-		if input.Result != "code_changed" && input.Result != "existing_code_confirmed" {
-			return errors.New("invalid confirmation result")
+		if prior.ID != "" {
+			var findings []domain.ReviewFinding
+			if err := tx.Raw(`SELECT message,path,line FROM review_finding WHERE review_id=? ORDER BY ordinal`, prior.ID).Scan(&findings).Error; err != nil {
+				return err
+			}
+			if prior.Verdict == input.Verdict && prior.TaskID == input.TaskID && reviewFindingsEqual(findings, input.Findings) {
+				return nil
+			}
+			return friendlyConflict{message: fmt.Sprintf("commit %s already has a different review for %s@%d", input.Commit, ref.ID, ref.Revision)}
 		}
+		if root.ReconciliationState == string(domain.InProgress) || root.ReconciliationState == string(domain.Satisfied) {
+			return friendlyConflict{message: fmt.Sprintf("requirement %s@%d cannot be reviewed while %s", ref.ID, ref.Revision, root.ReconciliationState)}
+		}
+
 		var taskID any
 		if input.TaskID != "" {
 			var task taskRow
@@ -722,40 +733,65 @@ func (store *Store) ConfirmRequirement(ctx context.Context, input domain.Confirm
 			if task.State != "complete" || task.CompletedCommit == nil || *task.CompletedCommit != input.Commit {
 				return friendlyConflict{message: fmt.Sprintf("task %s is not complete at commit %s", input.TaskID, input.Commit)}
 			}
-			taskID = input.TaskID
-		}
-		var pullRequestID any
-		if input.PullRequest != nil {
-			id, err := upsertPullRequest(tx, *input.PullRequest)
-			if err != nil {
+			var links int64
+			if err := tx.Model(&taskRequirementRow{}).Where("task_id=? AND requirement_id=? AND requirement_revision=?", input.TaskID, ref.ID, ref.Revision).Count(&links).Error; err != nil {
 				return err
 			}
-			pullRequestID = id
-			if input.TaskID != "" {
-				var links int64
-				if err := tx.Model(&taskPullRequestRow{}).Where("task_id=? AND pull_request_id=?", input.TaskID, id).Count(&links).Error; err != nil {
-					return err
-				}
-				if links == 0 {
-					return friendlyConflict{message: fmt.Sprintf("pull request %s is not linked to task %s", input.PullRequest.URL, input.TaskID)}
-				}
+			if links == 0 {
+				return friendlyConflict{message: fmt.Sprintf("task %s does not link to %s@%d", input.TaskID, ref.ID, ref.Revision)}
+			}
+			taskID = input.TaskID
+		}
+
+		reviewID := fmt.Sprintf("RV-%d", time.Now().UTC().UnixNano())
+		stamp := now()
+		if err := tx.Exec(`INSERT INTO requirement_review (id,requirement_id,requirement_revision,commit_sha,task_id,verdict,reviewed_at,reviewer_id) VALUES (?,?,?,?,?,?,?,?)`, reviewID, ref.ID, ref.Revision, input.Commit, taskID, input.Verdict, stamp, actor).Error; err != nil {
+			return err
+		}
+		created = true
+		for ordinal, finding := range input.Findings {
+			if err := tx.Exec(`INSERT INTO review_finding (review_id,ordinal,message,path,line) VALUES (?,?,?,?,?)`, reviewID, ordinal, finding.Message, finding.Path, finding.Line).Error; err != nil {
+				return err
 			}
 		}
-		if err := tx.Exec(`INSERT INTO reconciliation_confirmation (requirement_id,requirement_revision,result,commit_sha,task_id,pull_request_id,confirmed_at,actor_id) VALUES (?,?,?,?,?,?,?,?)`, ref.ID, ref.Revision, input.Result, input.Commit, taskID, pullRequestID, now(), actor).Error; err != nil {
+
+		state := domain.NotSatisfied
+		if input.Verdict == "accept" {
+			if err := tx.Exec(`UPDATE reconciliation_cause SET resolved_at=? WHERE requirement_id=? AND requirement_revision=? AND resolved_at IS NULL`, stamp, ref.ID, ref.Revision).Error; err != nil {
+				return err
+			}
+			state = domain.Satisfied
+		} else {
+			var causes int64
+			if err := tx.Table("reconciliation_cause").Where("requirement_id=? AND requirement_revision=? AND resolved_at IS NULL", ref.ID, ref.Revision).Count(&causes).Error; err != nil {
+				return err
+			}
+			if causes > 0 {
+				state = domain.NeedsReconciliation
+			}
+		}
+		if err := setRequirementState(tx, ref.ID, state, actor); err != nil {
 			return err
 		}
-		if err := tx.Exec(`UPDATE reconciliation_cause SET resolved_at=? WHERE requirement_id=? AND requirement_revision=? AND resolved_at IS NULL`, now(), ref.ID, ref.Revision).Error; err != nil {
-			return err
-		}
-		if err := setRequirementState(tx, ref.ID, domain.Implemented, actor); err != nil {
-			return err
-		}
-		return audit(ctx, tx, actor, "requirement.confirmed", "requirement", ref.ID, map[string]any{"revision": ref.Revision, "commit": input.Commit, "result": input.Result, "task": input.TaskID})
+		return audit(ctx, tx, actor, "requirement.reviewed", "requirement", ref.ID, map[string]any{"review": reviewID, "revision": ref.Revision, "commit": input.Commit, "verdict": input.Verdict, "task": input.TaskID})
 	})
 	if err != nil {
-		return domain.Requirement{}, err
+		return domain.Requirement{}, false, err
 	}
-	return store.GetRequirement(ctx, ref)
+	item, err := store.GetRequirement(ctx, ref)
+	return item, created, err
+}
+
+func reviewFindingsEqual(left, right []domain.ReviewFinding) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (store *Store) RetireRequirement(ctx context.Context, id, actor string) (domain.Requirement, error) {
@@ -1063,7 +1099,7 @@ ORDER BY d.id,d.revision`
 		if err != nil {
 			return 0, err
 		}
-		if state != domain.Implemented {
+		if state != domain.Satisfied {
 			count++
 		}
 	}
@@ -1119,7 +1155,7 @@ UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency
 			blockers = append(blockers, fmt.Sprintf("%s is stale; current revision is %d", ref, requirement.CurrentRevision))
 		case requirement.LifecycleState != string(domain.Active):
 			blockers = append(blockers, ref+" is retired")
-		case effectiveState != domain.Implemented:
+		case effectiveState != domain.Satisfied:
 			blockers = append(blockers, fmt.Sprintf("%s is %s", ref, effectiveState))
 		}
 	}
@@ -1187,7 +1223,7 @@ WHERE rr.parent_id=tr.requirement_id AND rr.parent_revision=tr.requirement_revis
 			return err
 		}
 		if blockers > 0 {
-			return friendlyConflict{message: fmt.Sprintf("task %s has requirement dependencies that are not implemented at their linked revisions", id)}
+			return friendlyConflict{message: fmt.Sprintf("task %s has requirement dependencies that are not satisfied at their linked revisions", id)}
 		}
 		tx.Exec(`DELETE FROM lease WHERE task_id=? AND expires_at<=?`, id, now())
 		var count int64
@@ -1328,31 +1364,31 @@ func refreshTaskRequirements(ctx context.Context, tx *gorm.DB, taskID, actor str
 		return err
 	}
 	for _, link := range links {
-		state := string(domain.Unimplemented)
+		state := string(domain.NotSatisfied)
 		var activeLeases int64
 		if err := tx.Raw(`SELECT count(*) FROM lease l JOIN task_requirement tr ON tr.task_id=l.task_id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND l.expires_at>?`, link.RequirementID, link.RequirementRevision, now()).Scan(&activeLeases).Error; err != nil {
 			return err
 		}
-		var confirmations int64
-		if err := tx.Table("reconciliation_confirmation").Where("requirement_id=? AND requirement_revision=?", link.RequirementID, link.RequirementRevision).Count(&confirmations).Error; err != nil {
+		var acceptedReviews int64
+		if err := tx.Table("requirement_review").Where("requirement_id=? AND requirement_revision=? AND verdict='accept'", link.RequirementID, link.RequirementRevision).Count(&acceptedReviews).Error; err != nil {
 			return err
 		}
 		var causes int64
 		if err := tx.Table("reconciliation_cause").Where("requirement_id=? AND requirement_revision=? AND resolved_at IS NULL", link.RequirementID, link.RequirementRevision).Count(&causes).Error; err != nil {
 			return err
 		}
-		var completedAfterConfirmation int64
-		if err := tx.Raw(`SELECT count(*) FROM task t JOIN task_requirement tr ON tr.task_id=t.id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND t.state='complete' AND t.completed_at>COALESCE((SELECT max(confirmed_at) FROM reconciliation_confirmation WHERE requirement_id=? AND requirement_revision=?),'')`, link.RequirementID, link.RequirementRevision, link.RequirementID, link.RequirementRevision).Scan(&completedAfterConfirmation).Error; err != nil {
+		var completedAfterReview int64
+		if err := tx.Raw(`SELECT count(*) FROM task t JOIN task_requirement tr ON tr.task_id=t.id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND t.state='complete' AND t.completed_at>COALESCE((SELECT max(reviewed_at) FROM requirement_review WHERE requirement_id=? AND requirement_revision=?),'')`, link.RequirementID, link.RequirementRevision, link.RequirementID, link.RequirementRevision).Scan(&completedAfterReview).Error; err != nil {
 			return err
 		}
 		if activeLeases > 0 {
 			state = string(domain.InProgress)
-		} else if completedAfterConfirmation > 0 {
+		} else if completedAfterReview > 0 {
 			state = string(domain.ReadyForReview)
 		} else if causes > 0 {
 			state = string(domain.NeedsReconciliation)
-		} else if confirmations > 0 {
-			state = string(domain.Implemented)
+		} else if acceptedReviews > 0 {
+			state = string(domain.Satisfied)
 		}
 		var current requirementRow
 		if err := tx.First(&current, "id=? AND current_revision=?", link.RequirementID, link.RequirementRevision).Error; err != nil {

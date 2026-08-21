@@ -89,13 +89,13 @@ button:disabled { opacity: .55; }
 .node-meta { margin-left: 10px; color: #68737f; font-size: 11px; }
 .status-chip { min-height: 17px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid transparent; border-radius: 9px; padding: 0 5px 0 3px; font-size: 10px; font-weight: 700; line-height: 15px; text-transform: capitalize; white-space: nowrap; }
 .status-chip .status-icon { width: 12px; height: 12px; }
-.status-chip.implemented, .status-chip.complete { color: #0e6027; background: #defbe6; border-color: #8ee6a8; }
+.status-chip.satisfied, .status-chip.complete { color: #0e6027; background: #defbe6; border-color: #8ee6a8; }
 .status-chip.needs_reconciliation { color: #684000; background: #fff1c7; border-color: #f1c21b; }
 .status-chip.blocked { color: #750e13; background: #fff1f1; border-color: #ff8389; }
 .status-chip.in_progress { color: #003a6d; background: #d0e2ff; border-color: #78a9ff; }
 .status-chip.ready_for_review { color: #491d8b; background: #f6f2ff; border-color: #be95ff; }
 .status-chip.ready { color: #005d5d; background: #d9fbfb; border-color: #3ddbd9; }
-.status-chip.open, .status-chip.unimplemented { color: #3d3d3d; background: #f4f4f4; border-color: #a8a8a8; }
+.status-chip.open, .status-chip.not_satisfied { color: #3d3d3d; background: #f4f4f4; border-color: #a8a8a8; }
 .status-chip.active { color: #003a6d; background: #e5f6ff; border-color: #82cfff; }
 .status-chip.retired, .status-chip.closed { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }
 .tree-row.selected .status-chip { color: #fff; background: rgb(255 255 255 / 14%); border-color: rgb(255 255 255 / 65%); }

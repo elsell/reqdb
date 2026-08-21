@@ -6,7 +6,7 @@ CREATE TABLE requirement (
         CHECK (lifecycle_state IN ('active', 'retired')),
     reconciliation_state TEXT NOT NULL
         CHECK (reconciliation_state IN (
-            'unimplemented', 'in_progress', 'implemented',
+            'not_satisfied', 'in_progress', 'satisfied',
             'needs_reconciliation', 'ready_for_review'
         )),
     created_at TEXT NOT NULL,
@@ -179,24 +179,32 @@ CREATE TABLE task_pull_request (
 CREATE INDEX task_pull_request_reverse
     ON task_pull_request(pull_request_id, task_id);
 
-CREATE TABLE reconciliation_confirmation (
-    id INTEGER PRIMARY KEY,
+CREATE TABLE requirement_review (
+    id TEXT PRIMARY KEY,
     requirement_id TEXT NOT NULL,
     requirement_revision INTEGER NOT NULL,
-    result TEXT NOT NULL
-        CHECK (result IN ('code_changed', 'existing_code_confirmed')),
     commit_sha TEXT NOT NULL,
     task_id TEXT REFERENCES task(id),
-    pull_request_id INTEGER REFERENCES pull_request(id),
-    confirmed_at TEXT NOT NULL,
-    actor_id TEXT NOT NULL,
-    note TEXT,
+    verdict TEXT NOT NULL CHECK (verdict IN ('accept', 'reject')),
+    reviewed_at TEXT NOT NULL,
+    reviewer_id TEXT NOT NULL,
+    UNIQUE (requirement_id, requirement_revision, commit_sha),
     FOREIGN KEY (requirement_id, requirement_revision)
         REFERENCES requirement_revision(requirement_id, revision)
 );
 
-CREATE INDEX confirmation_requirement
-    ON reconciliation_confirmation(requirement_id, requirement_revision);
+CREATE INDEX review_requirement
+    ON requirement_review(requirement_id, requirement_revision, reviewed_at);
+
+CREATE TABLE review_finding (
+    review_id TEXT NOT NULL REFERENCES requirement_review(id),
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+    message TEXT NOT NULL CHECK (length(trim(message)) > 0),
+    path TEXT NOT NULL DEFAULT '',
+    line INTEGER NOT NULL DEFAULT 0 CHECK (line >= 0),
+    PRIMARY KEY (review_id, ordinal),
+    CHECK (line = 0 OR length(trim(path)) > 0)
+);
 
 CREATE TABLE reconciliation_cause (
     requirement_id TEXT NOT NULL,

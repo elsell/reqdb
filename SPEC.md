@@ -40,13 +40,13 @@ immediate parent level. Each link shall name a parent revision. The refinement
 graph shall be acyclic.
 
 An active requirement with no active current refinement children shall be a
-leaf. Only a leaf can have implementation work or an implementation
-confirmation. A leaf shall use its stored reconciliation state.
+leaf. Only a leaf can have implementation work or a review. A leaf shall use
+its stored reconciliation state.
 
 An active non-leaf requirement shall derive its reconciliation state from its
-active current refinement children. It shall be `implemented` only when every
-active child is recursively `implemented`. Otherwise, it shall be
-`unimplemented`. A retired child shall not affect this roll-up.
+active current refinement children. It shall be `satisfied` only when every
+active child is recursively `satisfied`. Otherwise, it shall be
+`not_satisfied`. A retired child shall not affect this roll-up.
 
 Roll-up shall be calculated when reqdb reads or evaluates a requirement. Reqdb
 shall not store roll-up changes as reconciliation state history.
@@ -74,7 +74,7 @@ change.
 ## Lifecycle
 
 A requirement shall be `active` or `retired`. Retirement shall preserve all
-revisions, links, tasks, confirmations, and audit events. It shall not create a
+revisions, links, tasks, reviews, and audit events. It shall not create a
 content revision.
 
 When a requirement is retired, the server shall mark all active, transitive
@@ -82,16 +82,16 @@ downstream requirements as `needs_reconciliation`. It shall follow refinement an
 dependency links. It shall record the retired requirement as the cause. It
 shall not retire downstream requirements.
 
-A retired requirement cannot be revised or confirmed. A task that links to a
+A retired requirement cannot be revised or reviewed. A task that links to a
 retired requirement, or depends on a retired requirement, shall not be ready or
 leaseable.
 
 A requirement is ready when all these conditions are true:
 
 - Its lifecycle is `active`.
-- Its reconciliation state is `unimplemented` or `needs_reconciliation`.
+- Its reconciliation state is `not_satisfied` or `needs_reconciliation`.
 - All transitive requirement dependencies are current, active, and
-  `implemented`.
+  `satisfied`.
 - No non-complete task links to its current revision.
 
 Refinement parents shall not affect readiness.
@@ -104,42 +104,51 @@ shall use direct reconciliation. A non-leaf shall use refinement roll-up.
 
 | State | Meaning |
 |---|---|
-| `unimplemented` | A leaf has no accepted implementation, or a non-leaf has an unimplemented active child. |
+| `not_satisfied` | A leaf has no accepted review, or a non-leaf has a not-satisfied active child. |
 | `in_progress` | An active task implements or reconciles the requirement. |
-| `ready_for_review` | A task completed and the requirement needs confirmation. |
-| `implemented` | A leaf has a confirmation, or every active child of a non-leaf is recursively implemented. |
-| `needs_reconciliation` | An upstream requirement changed after confirmation. |
+| `ready_for_review` | A task completed and the requirement needs review. |
+| `satisfied` | A leaf has an accepted review, or every active child of a non-leaf is recursively satisfied. |
+| `needs_reconciliation` | An upstream requirement changed after an accepted review. |
 
-A confirmation shall name the requirement revision, Git commit, actor, time,
-and result. The result shall state that code changed or that existing code was
-confirmed.
+A review shall be an immutable record for one current, active leaf requirement
+revision and one full Git commit. It shall contain a server-generated ID, the
+reviewer, the review time, and the verdict `accept` or `reject`.
 
-The server shall reject a confirmation for a requirement that has an active
-current refinement child.
+A rejected review shall contain one or more findings. Each finding shall have a
+message. It can have a path and positive line. Findings shall use normalized
+rows, not raw JSON.
 
-Task completion shall not confirm implementation by itself. A confirmation
-may refer to the task and pull request that produced the result.
+Task completion shall not satisfy a requirement by itself. A review can refer
+to the completed task that produced the commit. That task shall link to the
+exact requirement revision, and its completion commit shall match the review.
 
 A completed task shall set each linked current leaf requirement to
 `ready_for_review`. A requirement in this state shall not be ready for another
-task. Confirmation shall set it to `implemented`.
+task. An accepted review shall set it to `satisfied` and resolve its open
+reconciliation causes. A rejected review shall set it to
+`needs_reconciliation` when an open cause exists. Otherwise, it shall set it to
+`not_satisfied`.
+
+A review without a task shall be valid for an actionable or ready-for-review
+requirement. The server shall make review creation idempotent by requirement
+ID, revision, and commit. An identical submission shall return the stored
+review. Different content for the same key shall cause a conflict.
 
 `requirement get` shall show its readiness result and all blockers. Readiness
 diagnostics shall include state, active tasks, stale dependencies, retired
-dependencies, and dependencies that are not implemented.
+dependencies, and dependencies that are not satisfied.
 
 When a requirement gets a new revision, the server shall:
 
-1. Set the requirement to `unimplemented`.
+1. Set the requirement to `not_satisfied`.
 2. Find all transitive downstream requirements through refinement and
    dependency links.
 3. Set each downstream requirement to `needs_reconciliation`.
 4. Record the changed requirement as an unresolved cause for each affected
    requirement.
 
-An active implementation or reconciliation task may set an unimplemented or
-affected leaf requirement to `in_progress`. A confirmation shall resolve the
-known causes for that leaf revision and set it to `implemented`.
+An active implementation or reconciliation task may set a not-satisfied or
+affected leaf requirement to `in_progress`.
 
 ## Tasks and leases
 
@@ -161,7 +170,7 @@ A task is ready when all these conditions are true:
 - The task has no active lease.
 - All task dependencies are complete.
 - All transitive dependencies of its linked requirements are current and
-  `implemented`.
+  `satisfied`.
 
 The lease operation shall check the same conditions in its transaction. Ready
 tasks shall sort by descending priority and then by ID.
@@ -184,13 +193,6 @@ A task can link to zero or more pull requests. A pull request can link to more
 than one task. Task detail output shall show all pull request links.
 
 `task get` shall show its state history, readiness result, and all blockers.
-
-A requirement confirmation shall accept an optional task and pull request. If
-a task is supplied, it shall be complete and its commit shall equal the
-confirmation commit. If both a task and pull request are supplied, the pull
-request shall be linked to the task. Reqdb shall store the commit and pull
-request as separate references. It shall not claim that a mutable pull request
-still points to the recorded commit.
 
 ## Audit
 
@@ -240,7 +242,7 @@ The core resource commands are:
 | `requirement check [ID] [OPTIONS]` | Validate one requirement input. |
 | `requirement create [ID] [OPTIONS]` | Create a requirement. |
 | `requirement update ID [OPTIONS]` | Create a requirement revision. |
-| `requirement confirm ID[@REVISION] --commit SHA` | Confirm that code matches a revision. |
+| `requirement review ID[@REVISION] --commit SHA --verdict VERDICT` | Accept or reject code for a revision. |
 | `requirement retire ID` | Retire a requirement without deleting its history. |
 | `requirement render ID` | Render one requirement and its context. |
 | `task list` | List tasks. |

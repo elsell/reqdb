@@ -34,7 +34,7 @@ func captureOutput(t *testing.T, run func() error) string {
 }
 
 func TestRequirementListUsesTable(t *testing.T) {
-	items := []domain.Requirement{{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Level: "business", Title: "Test result"}}}
+	items := []domain.Requirement{{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Level: "business", Title: "Test result"}}}
 	data, _ := json.Marshal(items)
 	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/requirements", data) })
 	for _, text := range []string{"ID", "RECONCILIATION", "BR-TEST-001", "Test result"} {
@@ -48,7 +48,7 @@ func TestRequirementListUsesTable(t *testing.T) {
 }
 
 func TestRequirementDetailUsesFields(t *testing.T) {
-	item := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Implemented, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Test result", Statement: "The organization shall get one result."}}
+	item := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Satisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Test result", Statement: "The organization shall get one result."}}
 	data, _ := json.Marshal(item)
 	output := captureOutput(t, func() error { return printHuman(http.MethodPost, "/v1/requirements", data) })
 	for _, text := range []string{"Requirement BR-TEST-001@1", "Title:", "Reconciliation:", "Statement:"} {
@@ -59,8 +59,8 @@ func TestRequirementDetailUsesFields(t *testing.T) {
 }
 
 func TestTraceUsesTreeBranches(t *testing.T) {
-	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
-	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}
+	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
+	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}
 	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root, child}})
 	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/BR-TEST-001", data) })
 	if !strings.Contains(output, "└── STR-TEST-001@1") {
@@ -69,8 +69,8 @@ func TestTraceUsesTreeBranches(t *testing.T) {
 }
 
 func TestTraceColorsRequirementMetadata(t *testing.T) {
-	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Implemented, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
-	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}
+	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Satisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
+	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}
 	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root, child}})
 	output := captureOutput(t, func() error { return printRequirementTreeWithColor(data, true) })
 	for _, value := range []string{
@@ -78,7 +78,7 @@ func TestTraceColorsRequirementMetadata(t *testing.T) {
 		"\x1b[1mSTR-TEST-001\x1b[0m",
 		"\x1b[90m@1\x1b[0m",
 		"\x1b[97;44m stakeholder \x1b[0m",
-		"\x1b[97;100m unimplemented \x1b[0m",
+		"\x1b[97;100m not_satisfied \x1b[0m",
 	} {
 		if !strings.Contains(output, value) {
 			t.Fatalf("colored trace does not contain %q: %q", value, output)
@@ -87,7 +87,7 @@ func TestTraceColorsRequirementMetadata(t *testing.T) {
 }
 
 func TestTraceShowsLinkedTask(t *testing.T) {
-	root := domain.Requirement{ID: "SWR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Unimplemented, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Calculate"}}
+	root := domain.Requirement{ID: "SWR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Calculate"}}
 	task := domain.Task{ID: "T-1", Title: "Implement calculation", State: "open", Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-TEST-001@1", Purpose: "implement"}}}
 	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root}, Tasks: []domain.Task{task}})
 	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/SWR-TEST-001", data) })

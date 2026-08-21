@@ -76,6 +76,40 @@ func TestInputModesCannotBeCombined(t *testing.T) {
 	}
 }
 
+func TestReviewInputFromFlags(t *testing.T) {
+	input, err := reviewInput([]string{"review", "SWR-TEST-001", "--commit", strings.Repeat("a", 40), "--verdict", "reject", "--task", "T-1", "--finding", "First finding", "--finding", "Second finding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Verdict != "reject" || input.TaskID != "T-1" || len(input.Findings) != 2 {
+		t.Fatalf("unexpected review input: %+v", input)
+	}
+}
+
+func TestReviewInputFromStandardInput(t *testing.T) {
+	original := os.Stdin
+	file, err := os.CreateTemp(t.TempDir(), "review-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString("commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nverdict: reject\nfindings:\n  - message: Missing result.\n    path: result.go\n    line: 7\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = file
+	defer func() { os.Stdin = original }()
+	input, err := reviewInput([]string{"review", "SWR-TEST-001", "--from-file", "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Verdict != "reject" || len(input.Findings) != 1 || input.Findings[0].Line != 7 {
+		t.Fatalf("unexpected review input: %+v", input)
+	}
+}
+
 func TestRequirementInputFromStandardInput(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	if err != nil {

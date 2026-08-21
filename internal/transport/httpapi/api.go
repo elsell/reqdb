@@ -254,18 +254,18 @@ func (api API) requirements(w http.ResponseWriter, r *http.Request, parts []stri
 		write(w, r, 200, item, "")
 		return
 	}
-	if len(parts) == 2 && parts[1] == "confirm" && r.Method == http.MethodPost {
+	if len(parts) == 2 && parts[1] == "reviews" && r.Method == http.MethodPost {
 		var body struct {
-			Commit      string              `json:"commit"`
-			Result      string              `json:"result"`
-			TaskID      string              `json:"task_id"`
-			PullRequest *domain.PullRequest `json:"pull_request"`
+			Commit   string                 `json:"commit"`
+			Verdict  string                 `json:"verdict"`
+			TaskID   string                 `json:"task_id"`
+			Findings []domain.ReviewFinding `json:"findings"`
 		}
 		if err := decode(r, &body); err != nil {
 			fail(w, r, err)
 			return
 		}
-		item, err := api.Service.ConfirmRequirement(r.Context(), domain.ConfirmationInput{Requirement: ref, Commit: body.Commit, Result: body.Result, TaskID: body.TaskID, PullRequest: body.PullRequest}, actor(r))
+		item, err := api.Service.ReviewRequirement(r.Context(), domain.ReviewInput{Requirement: ref, Commit: body.Commit, Verdict: body.Verdict, TaskID: body.TaskID, Findings: body.Findings}, actor(r))
 		if err != nil {
 			fail(w, r, err)
 			return

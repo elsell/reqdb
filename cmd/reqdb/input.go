@@ -9,10 +9,41 @@ import (
 
 	"github.com/elsell/reqdb/internal/application"
 	"github.com/elsell/reqdb/internal/domain"
+	"gopkg.in/yaml.v3"
 )
 
 var requirementContentOptions = []string{"--level", "--title", "--statement", "--refines", "--depends-on"}
 var taskContentOptions = []string{"--title", "--description", "--priority", "--requirement", "--depends-on"}
+var reviewContentOptions = []string{"--commit", "--verdict", "--task", "--finding"}
+
+type reviewDocument struct {
+	Commit   string                 `json:"commit" yaml:"commit"`
+	Verdict  string                 `json:"verdict" yaml:"verdict"`
+	TaskID   string                 `json:"task_id" yaml:"task_id"`
+	Findings []domain.ReviewFinding `json:"findings" yaml:"findings"`
+}
+
+func reviewInput(args []string) (reviewDocument, error) {
+	path := fileOption(args)
+	if path != "" {
+		if hasAnyOption(args, reviewContentOptions...) {
+			return reviewDocument{}, fmt.Errorf("--from-file cannot be combined with review content flags")
+		}
+		return decodeInput(path, func(reader io.Reader) (reviewDocument, error) {
+			var input reviewDocument
+			err := yaml.NewDecoder(reader).Decode(&input)
+			return input, err
+		})
+	}
+	if option(args, "--commit") == "" || option(args, "--verdict") == "" {
+		return reviewDocument{}, fmt.Errorf("--commit and --verdict are required")
+	}
+	input := reviewDocument{Commit: option(args, "--commit"), Verdict: option(args, "--verdict"), TaskID: option(args, "--task")}
+	for _, message := range options(args, "--finding") {
+		input.Findings = append(input.Findings, domain.ReviewFinding{Message: message})
+	}
+	return input, nil
+}
 
 func requirementInput(args []string, action string) (domain.RequirementInput, error) {
 	path := fileOption(args)

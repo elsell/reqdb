@@ -256,22 +256,15 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 			return withHelp(err.Error(), actionHelp["requirement update"])
 		}
 		return call(ctx, api, http.MethodPut, "/v1/requirements/"+url.PathEscape(args[1])+"?expected="+strconv.Itoa(expected), input, jsonOutput)
-	case "confirm":
+	case "review":
 		if len(args) < 2 {
-			return withHelp("a requirement ID is required", actionHelp["requirement confirm"])
+			return withHelp("a requirement ID is required", actionHelp["requirement review"])
 		}
-		if option(args, "--commit") == "" {
-			return withHelp("--commit is required", actionHelp["requirement confirm"])
+		input, err := reviewInput(args)
+		if err != nil {
+			return withHelp(err.Error(), actionHelp["requirement review"])
 		}
-		body := map[string]any{"commit": option(args, "--commit"), "result": option(args, "--result"), "task_id": option(args, "--task")}
-		if raw := option(args, "--pr"); raw != "" {
-			pr, err := httpapi.ParsePullRequest(raw)
-			if err != nil {
-				return err
-			}
-			body["pull_request"] = pr
-		}
-		return call(ctx, api, http.MethodPost, "/v1/requirements/"+url.PathEscape(args[1])+"/confirm", body, jsonOutput)
+		return call(ctx, api, http.MethodPost, "/v1/requirements/"+url.PathEscape(args[1])+"/reviews", input, jsonOutput)
 	case "retire":
 		if len(args) < 2 {
 			return withHelp("a requirement ID is required", actionHelp["requirement retire"])

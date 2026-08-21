@@ -43,7 +43,7 @@ Actions:
   check      Validate a requirement file
   create     Create a requirement
   update     Create a requirement revision
-  confirm    Confirm that code matches a requirement revision
+  review     Accept or reject code for a requirement revision
   retire     Retire a requirement
   render     Render a requirement and its descendants
 
@@ -168,15 +168,18 @@ Input Options:
   --refines ID@REVISION      Parent revision; repeat for more parents
   --depends-on ID@REVISION   Dependency revision; repeat for more dependencies
 `,
-	"requirement confirm": `Confirm that code matches a requirement revision.
+	"requirement review": `Review code against a requirement revision.
 
 Usage:
-  reqdb requirement confirm ID[@REVISION] --commit SHA [options]
+  reqdb requirement review ID[@REVISION] --commit SHA --verdict VERDICT [options]
+  reqdb requirement review ID[@REVISION] --from-file FILE [options]
 
 Options:
-  --result RESULT   code_changed or existing_code_confirmed
-  --task ID         Completed task that produced the implementation
-  --pr URL           Pull request associated with the confirmation
+  -f, --from-file FILE  Read YAML from FILE; use - for standard input
+  --commit SHA          Full 40-character Git commit
+  --verdict VERDICT     accept or reject
+  --task ID             Completed task associated with the commit
+  --finding MESSAGE     Rejection finding; repeat for more findings
 `,
 	"requirement retire": `Retire a requirement without deleting its history.
 

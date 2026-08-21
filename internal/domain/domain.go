@@ -25,10 +25,10 @@ type ReconciliationState string
 type LifecycleState string
 
 const (
-	Unimplemented       ReconciliationState = "unimplemented"
+	NotSatisfied        ReconciliationState = "not_satisfied"
 	InProgress          ReconciliationState = "in_progress"
 	ReadyForReview      ReconciliationState = "ready_for_review"
-	Implemented         ReconciliationState = "implemented"
+	Satisfied           ReconciliationState = "satisfied"
 	NeedsReconciliation ReconciliationState = "needs_reconciliation"
 )
 
@@ -75,7 +75,7 @@ type Requirement struct {
 	Revision            RequirementRevision   `json:"revision"`
 	RevisionHistory     []RequirementRevision `json:"revision_history,omitempty"`
 	StateHistory        []StateChange         `json:"state_history,omitempty"`
-	Confirmations       []Confirmation        `json:"confirmations,omitempty"`
+	Reviews             []Review              `json:"reviews,omitempty"`
 	OpenCauses          []ReconciliationCause `json:"open_causes,omitempty"`
 	Readiness           *Readiness            `json:"readiness,omitempty"`
 }
@@ -212,13 +212,20 @@ type StateChange struct {
 	ActorID    string    `json:"actor_id"`
 }
 
-type Confirmation struct {
-	Result      string       `json:"result"`
-	Commit      string       `json:"commit"`
-	TaskID      string       `json:"task_id,omitempty"`
-	PullRequest *PullRequest `json:"pull_request,omitempty"`
-	ConfirmedAt time.Time    `json:"confirmed_at"`
-	ActorID     string       `json:"actor_id"`
+type Review struct {
+	ID         string          `json:"id"`
+	Verdict    string          `json:"verdict"`
+	Commit     string          `json:"commit"`
+	TaskID     string          `json:"task_id,omitempty"`
+	Findings   []ReviewFinding `json:"findings,omitempty"`
+	ReviewedAt time.Time       `json:"reviewed_at"`
+	ReviewerID string          `json:"reviewer_id"`
+}
+
+type ReviewFinding struct {
+	Message string `json:"message" yaml:"message"`
+	Path    string `json:"path,omitempty" yaml:"path,omitempty"`
+	Line    int    `json:"line,omitempty" yaml:"line,omitempty"`
 }
 
 type ReconciliationCause struct {
@@ -226,12 +233,12 @@ type ReconciliationCause struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
-type ConfirmationInput struct {
+type ReviewInput struct {
 	Requirement RequirementRef
 	Commit      string
-	Result      string
+	Verdict     string
 	TaskID      string
-	PullRequest *PullRequest
+	Findings    []ReviewFinding
 }
 
 type Lease struct {
