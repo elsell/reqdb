@@ -83,10 +83,10 @@ dependency links. It shall record the retired requirement as the cause. It
 shall not retire downstream requirements.
 
 A retired requirement cannot be revised or reviewed. A task that links to a
-retired requirement, or depends on a retired requirement, shall not be ready or
+retired requirement, or depends on a retired requirement, shall not be workable or
 leaseable.
 
-A requirement is ready when all these conditions are true:
+A requirement is workable when all these conditions are true:
 
 - Its lifecycle is `active`.
 - Its reconciliation state is `not_satisfied` or `needs_reconciliation`.
@@ -94,7 +94,17 @@ A requirement is ready when all these conditions are true:
   `satisfied`.
 - No non-complete task links to its current revision.
 
-Refinement parents shall not affect readiness.
+Refinement parents shall not affect workability.
+
+Reqdb shall compute one requirement disposition:
+
+- `ready_for_work`: The requirement is workable.
+- `work_in_progress`: An active task lease covers the requirement.
+- `awaiting_review`: A completed task caused `ready_for_review`.
+- `no_work_required`: The requirement is satisfied.
+- `waiting`: A dependency or existing task must change first.
+- `unavailable`: The revision is stale or the requirement is retired.
+- `managed_through_children`: Active refinement children own the work.
 
 ## Reconciliation
 
@@ -128,7 +138,7 @@ to the completed task that produced the commit. That task shall link to the
 exact requirement revision, and its completion commit shall match the review.
 
 A completed task shall set each linked current leaf requirement to
-`ready_for_review`. A requirement in this state shall not be ready for another
+`ready_for_review`. A requirement in this state shall not be workable for another
 task. An accepted review shall set it to `satisfied` and resolve its open
 reconciliation causes. A rejected review shall set it to
 `needs_reconciliation` when an open cause exists. Otherwise, it shall set it to
@@ -139,8 +149,8 @@ requirement. The server shall make review creation idempotent by requirement
 ID, revision, and commit. An identical submission shall return the stored
 review. Different content for the same key shall cause a conflict.
 
-`requirement get` shall show its readiness result and all blockers. Readiness
-diagnostics shall include state, active tasks, stale dependencies, retired
+`requirement get` shall show its workability, disposition, and reasons. The
+reasons shall include state, active tasks, stale dependencies, retired
 dependencies, and dependencies that are not satisfied.
 
 When a requirement gets a new revision, the server shall:
@@ -169,7 +179,7 @@ unleased task without completing it. A closed task shall not satisfy task
 dependencies and shall not prevent creation of replacement work for a linked
 requirement.
 
-A task is ready when all these conditions are true:
+A task is workable when all these conditions are true:
 
 - The task is open.
 - The task has no active lease.
@@ -177,8 +187,16 @@ A task is ready when all these conditions are true:
 - All transitive dependencies of its linked requirements are current and
   `satisfied`.
 
-The lease operation shall check the same conditions in its transaction. Ready
+The lease operation shall check the same conditions in its transaction. Workable
 tasks shall sort by descending priority and then by ID.
+
+Reqdb shall compute one task disposition:
+
+- `ready_to_lease`: The task is workable.
+- `work_in_progress`: An active lease covers the task.
+- `waiting`: A dependency or linked requirement must change first.
+- `complete`: The task is complete.
+- `closed`: The task is closed.
 
 A claim shall create one lease in one transaction. A lease shall identify the
 task, agent, fence, claim time, and expiry time. Claim, heartbeat, release, and
@@ -197,7 +215,7 @@ A completed task shall record its full 40-character hexadecimal Git commit.
 A task can link to zero or more pull requests. A pull request can link to more
 than one task. Task detail output shall show all pull request links.
 
-`task get` shall show its state history, readiness result, and all blockers.
+`task get` shall show its state history, workability, disposition, and reasons.
 
 ## Audit
 
@@ -242,7 +260,7 @@ The core resource commands are:
 | Command | Result |
 |---|---|
 | `requirement list` | List requirements. |
-| `requirement ready` | List requirements that are ready for work. |
+| `requirement workable` | List requirements that permit new work. |
 | `requirement get ID[@REVISION]` | Show one requirement revision. |
 | `requirement check [ID] [OPTIONS]` | Validate one requirement input. |
 | `requirement create [ID] [OPTIONS]` | Create a requirement. |
@@ -255,7 +273,7 @@ The core resource commands are:
 | `task list` | List tasks. |
 | `task get ID` | Show one task. |
 | `task create [OPTIONS]` | Create a task. |
-| `task ready` | List ready tasks. |
+| `task workable` | List tasks that are ready to lease. |
 | `task lease ID --agent ID` | Lease one task. |
 | `task complete ID --lease ID --fence N --commit SHA` | Complete one task. |
 | `task close ID` | Close an open, unleased task. |

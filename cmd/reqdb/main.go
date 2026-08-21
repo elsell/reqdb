@@ -240,10 +240,10 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 	}
 	action := args[0]
 	switch action {
-	case "list", "ready":
+	case "list", "workable":
 		path := "/v1/requirements?cursor=" + url.QueryEscape(option(args, "--cursor"))
-		if action == "ready" {
-			path += "&ready=true"
+		if action == "workable" {
+			path += "&workable=true"
 		} else {
 			path += "&level=" + url.QueryEscape(option(args, "--level")) + "&state=" + url.QueryEscape(option(args, "--state"))
 		}
@@ -309,10 +309,10 @@ func task(ctx context.Context, api client.Client, args []string, jsonOutput bool
 	}
 	action := args[0]
 	switch action {
-	case "list", "ready":
+	case "list", "workable":
 		path := "/v1/tasks?cursor=" + url.QueryEscape(option(args, "--cursor"))
-		if action == "ready" {
-			path += "&ready=true"
+		if action == "workable" {
+			path += "&workable=true"
 		}
 		return call(ctx, api, http.MethodGet, path, nil, jsonOutput)
 	case "get":

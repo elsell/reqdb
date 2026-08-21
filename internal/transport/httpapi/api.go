@@ -202,8 +202,8 @@ func (api API) requirements(w http.ResponseWriter, r *http.Request, parts []stri
 	if len(parts) == 0 && r.Method == http.MethodGet {
 		var page domain.Page[domain.Requirement]
 		var err error
-		if r.URL.Query().Get("ready") == "true" {
-			page, err = api.Service.ListReadyRequirements(r.Context(), r.URL.Query().Get("cursor"), limit(r), actor(r))
+		if r.URL.Query().Get("workable") == "true" {
+			page, err = api.Service.ListWorkableRequirements(r.Context(), r.URL.Query().Get("cursor"), limit(r), actor(r))
 		} else {
 			page, err = api.Service.ListRequirements(r.Context(), r.URL.Query().Get("cursor"), limit(r), r.URL.Query().Get("level"), r.URL.Query().Get("state"), actor(r))
 		}
@@ -311,7 +311,7 @@ func (api API) requirements(w http.ResponseWriter, r *http.Request, parts []stri
 
 func (api API) tasks(w http.ResponseWriter, r *http.Request, parts []string) {
 	if len(parts) == 0 && r.Method == http.MethodGet {
-		page, err := api.Service.ListTasks(r.Context(), r.URL.Query().Get("cursor"), limit(r), r.URL.Query().Get("ready") == "true", actor(r))
+		page, err := api.Service.ListTasks(r.Context(), r.URL.Query().Get("cursor"), limit(r), r.URL.Query().Get("workable") == "true", actor(r))
 		if err != nil {
 			fail(w, r, err)
 			return

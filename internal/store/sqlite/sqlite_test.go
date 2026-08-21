@@ -21,6 +21,72 @@ func requirement(id, level string, revision int, parents ...string) domain.Requi
 	return input
 }
 
+func TestComputedWorkabilityAndDisposition(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	input := requirement("BR-WORKABLE-001", "business", 1)
+	item, err := store.CreateRequirement(ctx, input, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkability(t, item.Workability, true, "ready_for_work")
+
+	taskInput := domain.TaskInput{Schema: "task/v1", ID: "T-700", Title: "Implement", Description: "Implement the requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: input.ID + "@1", Purpose: "implement"}}}
+	task, err := store.CreateTask(ctx, taskInput, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = store.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkability(t, task.Workability, true, "ready_to_lease")
+	item, _ = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
+	assertWorkability(t, item.Workability, false, "waiting")
+
+	lease, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ = store.GetTask(ctx, task.ID)
+	assertWorkability(t, task.Workability, false, "work_in_progress")
+	item, _ = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
+	assertWorkability(t, item.Workability, false, "work_in_progress")
+
+	commit := strings.Repeat("e", 40)
+	if _, err := store.CompleteTask(ctx, task.ID, lease.LeaseID, lease.Fence, commit, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	task, _ = store.GetTask(ctx, task.ID)
+	assertWorkability(t, task.Workability, false, "complete")
+	item, _ = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
+	assertWorkability(t, item.Workability, false, "awaiting_review")
+	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: commit, TaskID: task.ID, Verdict: "accept"}, "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	item, _ = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
+	assertWorkability(t, item.Workability, false, "no_work_required")
+	if len(item.Workability.Reasons) == 0 || !strings.Contains(item.Workability.Reasons[0], "no new work is required") {
+		t.Fatalf("satisfied requirement has unclear reasons: %+v", item.Workability)
+	}
+}
+
+func assertWorkability(t *testing.T, actual *domain.Workability, workable bool, disposition string) {
+	t.Helper()
+	if actual == nil || actual.Workable != workable || actual.Disposition != disposition || len(actual.Reasons) == 0 {
+		t.Fatalf("workability is %+v, expected workable=%t disposition=%s with reasons", actual, workable, disposition)
+	}
+}
+
 func TestReviewVerdictsFindingsAndIdempotency(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
@@ -739,7 +805,7 @@ func TestReadyRequirementsFollowDependenciesAndTasks(t *testing.T) {
 
 func assertReadyRequirements(t *testing.T, store *sqlite.Store, expected ...string) {
 	t.Helper()
-	page, err := store.ListReadyRequirements(context.Background(), "", 20)
+	page, err := store.ListWorkableRequirements(context.Background(), "", 20)
 	if err != nil {
 		t.Fatal(err)
 	}

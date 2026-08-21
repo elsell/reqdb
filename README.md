@@ -39,7 +39,7 @@ build/reqdb requirement create --from-file examples/requirements/SyRS/SYR-SESSIO
 build/reqdb requirement create --from-file examples/requirements/SRS/SWR-SESSION-001.yaml
 build/reqdb requirement list
 build/reqdb task create --from-file examples/tasks/T-0042.yaml
-build/reqdb task ready
+build/reqdb task workable
 ```
 
 Use `--json` for machine-readable output. Use `--actor ID` to identify the

@@ -39,7 +39,7 @@ Usage:
 
 Actions:
   list       List requirements
-  ready      List requirements that are ready for work
+  workable   List requirements that permit new work
   get        Show one requirement revision
   check      Validate a requirement file
   create     Create a requirement
@@ -58,7 +58,7 @@ Usage:
 
 Actions:
   list       List tasks
-  ready      List tasks that are ready for work
+  workable   List tasks that are ready to lease
   get        Show one task
   create     Create a task from a file
   lease      Lease a task to an agent
@@ -139,10 +139,10 @@ Options:
   --state STATE     Filter by reconciliation state
   --json            Print the API response as JSON
 `,
-	"requirement ready": `List requirements that are ready for implementation or reconciliation.
+	"requirement workable": `List requirements that permit implementation or reconciliation work.
 
 Usage:
-  reqdb requirement ready [--cursor ID] [options]
+  reqdb requirement workable [--cursor ID] [options]
 `,
 	"requirement get": `Show one requirement revision.
 
@@ -219,10 +219,10 @@ Usage:
 Usage:
   reqdb task list [--cursor ID] [options]
 `,
-	"task ready": `List tasks that are ready for work.
+	"task workable": `List tasks that are ready to lease.
 
 Usage:
-  reqdb task ready [--cursor ID] [options]
+  reqdb task workable [--cursor ID] [options]
 `,
 	"task get": `Show one task.
 
@@ -245,7 +245,7 @@ Input Options:
 
 PURPOSE is implement or reconcile.
 `,
-	"task lease": `Lease a ready task to an agent.
+	"task lease": `Lease a workable task to an agent.
 
 Usage:
   reqdb task lease ID --agent AGENT [--ttl DURATION] [options]

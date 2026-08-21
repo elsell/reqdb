@@ -62,11 +62,13 @@ function headerCell(label, definition) {
 
 function statusIcon(value) {
   if (value === "satisfied" || value === "complete") return "check";
-  if (value === "needs_reconciliation" || value === "blocked") return "warning";
+  if (value === "needs_reconciliation") return "warning";
   if (value === "ready_for_review") return "review";
-  if (value === "ready") return "ready";
-  if (value === "in_progress") return "progress";
-  if (value === "retired" || value === "closed") return "retired";
+  if (value === "ready_for_work" || value === "ready_to_lease") return "ready";
+  if (value === "in_progress" || value === "work_in_progress") return "progress";
+  if (value === "awaiting_review") return "review";
+  if (value === "no_work_required") return "check";
+  if (value === "retired" || value === "closed" || value === "unavailable") return "retired";
   return "pending";
 }
 
@@ -203,12 +205,12 @@ function button(hasChildren, collapsed, toggle) {
   return control;
 }
 
-function nodeRow({ id, title, lifecycleValue, leaseLabel, ready, stateValue, stateLabel, type, iconName, depth = 0, hasChildren, collapsed, toggle, group, actions, selected, select }) {
+function nodeRow({ id, title, lifecycleValue, leaseLabel, workability, stateValue, stateLabel, type, iconName, depth = 0, hasChildren, collapsed, toggle, group, actions, selected, select }) {
   const row = element("div", `tree-row${group ? " group" : ""}${selected ? " selected" : ""}`);
   row.setAttribute("role", "treeitem");
   if (hasChildren) row.setAttribute("aria-expanded", String(!collapsed));
   if (select) row.setAttribute("aria-selected", String(Boolean(selected)));
-  row.title = [id, title, lifecycleValue, stateValue, ready ? "ready" : ""].filter(Boolean).join(" — ");
+  row.title = [id, title, lifecycleValue, stateValue, workability?.disposition].filter(Boolean).join(" — ");
 
   const primary = element("div", "tree-primary");
   primary.style.setProperty("--depth", String(depth));
@@ -224,10 +226,10 @@ function nodeRow({ id, title, lifecycleValue, leaseLabel, ready, stateValue, sta
     workState.append(icon("lease", "status-icon lease-mark"));
     workState.title = leaseLabel;
   }
-  const readiness = element("div", `tree-attribute${group ? " muted" : ""}`);
-  if (group) readiness.textContent = "—";
-  else readiness.append(ready ? statusChip("ready", "Yes") : statusChip("open", "No"));
-  row.append(primary, lifecycle, workState, readiness);
+  const workabilityCell = element("div", `tree-attribute${group ? " muted" : ""}`);
+  if (group) workabilityCell.textContent = "—";
+  else workabilityCell.append(statusChip(workability?.disposition || "waiting"));
+  row.append(primary, lifecycle, workState, workabilityCell);
   if (select) {
     row.classList.add("clickable");
     row.tabIndex = 0;
@@ -309,12 +311,12 @@ function renderExplorer() {
     headerCell("Item"),
     headerCell("Lifecycle", "Shows whether the item is active or retired."),
     headerCell("Work state", "Shows the requirement reconciliation state or the task progress state."),
-    headerCell("Ready", "Shows whether the item meets all rules that permit new work. Open the item to see blockers."),
+    headerCell("Workability", "Shows the computed work disposition. Open the item to see whether it is workable and why."),
   );
   elements.explorer.append(header);
   const requirementOrder = (left, right) => left.id.localeCompare(right.id);
   const requirements = graph(state.requirements, item => item.revision.parents.map(parent => parent.id), requirementOrder);
-  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state, ...(item.readiness?.blockers || [])];
+  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state, item.workability?.disposition, ...(item.workability?.reasons || [])];
   describeRequirement = item => {
     const actions = [{ label: "Copy ID", run: () => copy(`${item.id}@${item.current_revision}`) }];
     if (item.lifecycle_state !== "retired") {
@@ -341,12 +343,12 @@ function renderExplorer() {
     return {
       id: `${item.id}@${item.current_revision}`, title: item.revision.title,
       iconName: item.revision.level, lifecycleValue: item.lifecycle_state, stateValue: item.reconciliation_state,
-      ready: item.readiness?.ready, actions,
+      workability: item.workability, actions,
     };
   };
 
   const taskOrder = (left, right) => right.priority - left.priority || left.id.localeCompare(right.id);
-  const taskValues = item => [item.id, item.title, item.description, item.state, ...(item.requirements || []).map(link => link.requirement), ...(item.readiness?.blockers || [])];
+  const taskValues = item => [item.id, item.title, item.description, item.state, item.workability?.disposition, ...(item.requirements || []).map(link => link.requirement), ...(item.workability?.reasons || [])];
   describeTask = item => {
     const lease = state.leases.find(value => value.task_id === item.id);
     const actions = [{ label: "Copy ID", run: () => copy(item.id) }];
@@ -383,7 +385,7 @@ function renderExplorer() {
     return {
       id: `${item.id}@${item.version}`, title: item.title,
       meta: item.pull_requests?.length ? `${item.pull_requests.length} PR` : "",
-      stateValue: item.state, ready: item.readiness?.ready, leaseLabel: lease ? `leased · ${lease.agent_id}` : "", actions,
+      stateValue: item.state, workability: item.workability, leaseLabel: lease ? `leased · ${lease.agent_id}` : "", actions,
     };
   };
 
@@ -496,7 +498,7 @@ function renderDetails() {
     const statuses = element("div", "detail-statuses");
     statuses.append(statusChip(item.lifecycle_state));
     statuses.append(statusChip(item.reconciliation_state));
-    if (item.readiness?.ready) statuses.append(statusChip("ready"));
+    if (item.workability) statuses.append(statusChip(item.workability.disposition));
     elements.details.append(statuses);
     elements.details.append(detailActions(description.actions));
     const properties = element("div", "properties");
@@ -508,9 +510,9 @@ function renderDetails() {
     property(properties, "Actor", item.revision.actor_id);
     property(properties, "Created", new Date(item.revision.created_at).toLocaleString());
     elements.details.append(properties, detailSection("Statement", item.revision.statement));
-    if (!item.readiness) elements.details.append(detailSection("History and readiness", "Loading…"));
+    if (!item.workability) elements.details.append(detailSection("History and workability", "Loading…"));
     else {
-      elements.details.append(detailItems("Readiness", item.readiness.ready ? ["Ready"] : item.readiness.blockers));
+      elements.details.append(detailItems("Workability", [`Workable: ${item.workability.workable ? "yes" : "no"}`, `Disposition: ${item.workability.disposition}`, ...item.workability.reasons]));
       elements.details.append(detailItems("Revision history", (item.revision_history || []).map(value => `Revision ${value.revision}: ${value.title} — ${new Date(value.created_at).toLocaleString()} — ${value.actor_id}`)));
       elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.field}: ${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
       elements.details.append(detailItems("Reviews", (item.reviews || []).flatMap(value => [
@@ -529,7 +531,7 @@ function renderDetails() {
   elements.details.append(detailTitle("task", `${item.id}: ${item.title}`));
   const statuses = element("div", "detail-statuses");
   statuses.append(statusChip(item.state));
-  if (item.readiness?.ready) statuses.append(statusChip("ready"));
+  if (item.workability) statuses.append(statusChip(item.workability.disposition));
   if (lease) statuses.append(statusChip("in_progress", `leased · ${lease.agent_id}`));
   elements.details.append(statuses);
   elements.details.append(detailActions(description.actions));
@@ -545,9 +547,9 @@ function renderDetails() {
   property(properties, "Agent", lease?.agent_id);
   property(properties, "Expires", lease ? new Date(lease.expires_at).toLocaleString() : "");
   elements.details.append(properties, detailSection("Description", item.description));
-  if (!item.readiness) elements.details.append(detailSection("History and readiness", "Loading…"));
+  if (!item.workability) elements.details.append(detailSection("History and workability", "Loading…"));
   else {
-    elements.details.append(detailItems("Readiness", item.readiness.ready ? ["Ready"] : item.readiness.blockers));
+    elements.details.append(detailItems("Workability", [`Workable: ${item.workability.workable ? "yes" : "no"}`, `Disposition: ${item.workability.disposition}`, ...item.workability.reasons]));
     elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
   }
 }

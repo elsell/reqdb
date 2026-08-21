@@ -32,7 +32,7 @@ type Store interface {
 	UpdateRequirement(context.Context, domain.RequirementInput, int, string) (domain.Requirement, error)
 	GetRequirement(context.Context, domain.RequirementRef) (domain.Requirement, error)
 	ListRequirements(context.Context, string, int, string, string) (domain.Page[domain.Requirement], error)
-	ListReadyRequirements(context.Context, string, int) (domain.Page[domain.Requirement], error)
+	ListWorkableRequirements(context.Context, string, int) (domain.Page[domain.Requirement], error)
 	ReviewRequirement(context.Context, domain.ReviewInput, string) (domain.Requirement, bool, error)
 	GetReview(context.Context, string) (domain.Review, error)
 	ListReviews(context.Context, domain.RequirementRef, string, int) (domain.Page[domain.Review], error)

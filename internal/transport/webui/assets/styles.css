@@ -53,7 +53,7 @@ button:disabled { opacity: .55; }
 .tree { flex: 1; min-height: 0; padding: 3px 4px 8px; overflow: auto; white-space: nowrap; }
 .loading, .empty { padding: 7px; color: var(--muted); }
 .tree-node { position: relative; min-width: 780px; }
-.tree-header, .tree-row { display: grid; grid-template-columns: minmax(300px, 1fr) 88px 160px 82px; min-width: 780px; }
+.tree-header, .tree-row { display: grid; grid-template-columns: minmax(300px, 1fr) 88px 150px 150px; min-width: 850px; }
 .tree-header { position: sticky; z-index: 3; top: -3px; height: 22px; align-items: center; color: #263442; background: linear-gradient(#f8f9fa, #dce2e8); border-bottom: 1px solid #8996a5; font-weight: 700; }
 .tree-header-cell { height: 100%; display: flex; align-items: center; padding: 0 5px; border-right: 1px solid #aeb6bf; }
 .column-help { position: relative; width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; margin-left: 3px; color: #42566b; cursor: help; }
@@ -91,10 +91,14 @@ button:disabled { opacity: .55; }
 .status-chip .status-icon { width: 12px; height: 12px; }
 .status-chip.satisfied, .status-chip.complete { color: #0e6027; background: #defbe6; border-color: #8ee6a8; }
 .status-chip.needs_reconciliation { color: #684000; background: #fff1c7; border-color: #f1c21b; }
-.status-chip.blocked { color: #750e13; background: #fff1f1; border-color: #ff8389; }
 .status-chip.in_progress { color: #003a6d; background: #d0e2ff; border-color: #78a9ff; }
+.status-chip.work_in_progress { color: #003a6d; background: #d0e2ff; border-color: #78a9ff; }
 .status-chip.ready_for_review { color: #491d8b; background: #f6f2ff; border-color: #be95ff; }
-.status-chip.ready { color: #005d5d; background: #d9fbfb; border-color: #3ddbd9; }
+.status-chip.awaiting_review { color: #491d8b; background: #f6f2ff; border-color: #be95ff; }
+.status-chip.ready_for_work, .status-chip.ready_to_lease { color: #005d5d; background: #d9fbfb; border-color: #3ddbd9; }
+.status-chip.no_work_required { color: #0e6027; background: #defbe6; border-color: #8ee6a8; }
+.status-chip.waiting, .status-chip.managed_through_children { color: #3d3d3d; background: #f4f4f4; border-color: #a8a8a8; }
+.status-chip.unavailable { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }
 .status-chip.open, .status-chip.not_satisfied { color: #3d3d3d; background: #f4f4f4; border-color: #a8a8a8; }
 .status-chip.active { color: #003a6d; background: #e5f6ff; border-color: #82cfff; }
 .status-chip.retired, .status-chip.closed { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }

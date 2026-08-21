@@ -171,11 +171,11 @@ func (service Service) ListRequirements(ctx context.Context, cursor string, limi
 	}
 	return service.Store.ListRequirements(ctx, cursor, limit, level, state)
 }
-func (service Service) ListReadyRequirements(ctx context.Context, cursor string, limit int, actor string) (domain.Page[domain.Requirement], error) {
+func (service Service) ListWorkableRequirements(ctx context.Context, cursor string, limit int, actor string) (domain.Page[domain.Requirement], error) {
 	if err := service.authorize(ctx, actor, "requirement.read", ""); err != nil {
 		return domain.Page[domain.Requirement]{}, err
 	}
-	return service.Store.ListReadyRequirements(ctx, cursor, limit)
+	return service.Store.ListWorkableRequirements(ctx, cursor, limit)
 }
 func (service Service) ReviewRequirement(ctx context.Context, input domain.ReviewInput, actor string) (domain.Requirement, error) {
 	if err := service.authorize(ctx, actor, "requirement.review", input.Requirement.ID); err != nil {
@@ -281,11 +281,11 @@ func (service Service) GetTask(ctx context.Context, id, actor string) (domain.Ta
 	}
 	return service.Store.GetTask(ctx, id)
 }
-func (service Service) ListTasks(ctx context.Context, cursor string, limit int, ready bool, actor string) (domain.Page[domain.Task], error) {
+func (service Service) ListTasks(ctx context.Context, cursor string, limit int, workable bool, actor string) (domain.Page[domain.Task], error) {
 	if err := service.authorize(ctx, actor, "task.read", ""); err != nil {
 		return domain.Page[domain.Task]{}, err
 	}
-	return service.Store.ListTasks(ctx, cursor, limit, ready)
+	return service.Store.ListTasks(ctx, cursor, limit, workable)
 }
 func (service Service) LeaseTask(ctx context.Context, id, agent string, ttl time.Duration, actor string) (domain.Lease, error) {
 	if err := service.authorize(ctx, actor, "task.lease", id); err != nil {
@@ -383,6 +383,12 @@ func Render(requirements []domain.Requirement) string {
 	for _, item := range requirements {
 		fmt.Fprintf(&text, "## %s: %s\n\n", item.ID, item.Revision.Title)
 		fmt.Fprintf(&text, "- Level: %s\n- Revision: %d\n- Lifecycle: %s\n- Reconciliation: %s\n", item.Revision.Level, item.Revision.Revision, item.LifecycleState, item.ReconciliationState)
+		if item.Workability != nil {
+			fmt.Fprintf(&text, "- Workable: %t\n- Disposition: %s\n", item.Workability.Workable, item.Workability.Disposition)
+			for _, reason := range item.Workability.Reasons {
+				fmt.Fprintf(&text, "  - Reason: %s\n", reason)
+			}
+		}
 		if len(item.Revision.Parents) > 0 {
 			fmt.Fprint(&text, "- Refines:")
 			for _, parent := range item.Revision.Parents {

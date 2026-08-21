@@ -77,7 +77,7 @@ type Requirement struct {
 	StateHistory        []StateChange         `json:"state_history,omitempty"`
 	Reviews             []Review              `json:"reviews,omitempty"`
 	OpenCauses          []ReconciliationCause `json:"open_causes,omitempty"`
-	Readiness           *Readiness            `json:"readiness,omitempty"`
+	Workability         *Workability          `json:"workability,omitempty"`
 }
 
 type RequirementRevision struct {
@@ -195,12 +195,13 @@ type Task struct {
 	DependsOn       []string               `json:"depends_on"`
 	PullRequests    []PullRequest          `json:"pull_requests,omitempty"`
 	StateHistory    []StateChange          `json:"state_history,omitempty"`
-	Readiness       *Readiness             `json:"readiness,omitempty"`
+	Workability     *Workability           `json:"workability,omitempty"`
 }
 
-type Readiness struct {
-	Ready    bool     `json:"ready"`
-	Blockers []string `json:"blockers"`
+type Workability struct {
+	Workable    bool     `json:"workable"`
+	Disposition string   `json:"disposition"`
+	Reasons     []string `json:"reasons"`
 }
 
 type StateChange struct {

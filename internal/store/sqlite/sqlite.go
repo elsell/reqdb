@@ -377,6 +377,11 @@ func (store *Store) getRequirement(ctx context.Context, ref domain.RequirementRe
 		return domain.Requirement{}, err
 	}
 	item := domain.Requirement{ID: root.ID, CurrentRevision: root.CurrentRevision, LifecycleState: domain.LifecycleState(root.LifecycleState), ReconciliationState: effectiveState, Revision: revision}
+	workability, err := store.requirementWorkability(ctx, item)
+	if err != nil {
+		return domain.Requirement{}, err
+	}
+	item.Workability = &workability
 	if !detail {
 		return item, nil
 	}
@@ -417,11 +422,6 @@ func (store *Store) getRequirement(ctx context.Context, ref domain.RequirementRe
 	if err != nil {
 		return domain.Requirement{}, err
 	}
-	readiness, err := store.requirementReadiness(ctx, item)
-	if err != nil {
-		return domain.Requirement{}, err
-	}
-	item.Readiness = &readiness
 	return item, nil
 }
 
@@ -529,7 +529,7 @@ func (store *Store) ListRequirements(ctx context.Context, cursor string, limit i
 	return page, nil
 }
 
-func (store *Store) ListReadyRequirements(ctx context.Context, cursor string, limit int) (domain.Page[domain.Requirement], error) {
+func (store *Store) ListWorkableRequirements(ctx context.Context, cursor string, limit int) (domain.Page[domain.Requirement], error) {
 	query := store.db.WithContext(ctx).Model(&requirementRow{}).
 		Where("requirement.id > ?", cursor).
 		Where("requirement.lifecycle_state=?", domain.Active).
@@ -544,11 +544,7 @@ func (store *Store) ListReadyRequirements(ctx context.Context, cursor string, li
 		if err != nil {
 			return domain.Page[domain.Requirement]{}, err
 		}
-		readiness, err := store.requirementReadiness(ctx, item)
-		if err != nil {
-			return domain.Page[domain.Requirement]{}, err
-		}
-		if readiness.Ready {
+		if item.Workability.Workable {
 			items = append(items, item)
 			if len(items) == limit+1 {
 				break
@@ -680,30 +676,38 @@ func (store *Store) openCauses(ctx context.Context, requirementID string, revisi
 	return items, nil
 }
 
-func (store *Store) requirementReadiness(ctx context.Context, item domain.Requirement) (domain.Readiness, error) {
-	blockers := []string{}
+func (store *Store) requirementWorkability(ctx context.Context, item domain.Requirement) (domain.Workability, error) {
+	reasons := []string{}
 	if item.Revision.Revision != item.CurrentRevision {
-		blockers = append(blockers, fmt.Sprintf("revision %d is not current revision %d", item.Revision.Revision, item.CurrentRevision))
+		return domain.Workability{Disposition: "unavailable", Reasons: []string{fmt.Sprintf("revision %d is not current revision %d", item.Revision.Revision, item.CurrentRevision)}}, nil
 	}
 	if item.LifecycleState != domain.Active {
-		blockers = append(blockers, "requirement is retired")
+		return domain.Workability{Disposition: "unavailable", Reasons: []string{"requirement is retired"}}, nil
 	}
 	hasChildren, err := hasActiveRefinementChildren(store.db.WithContext(ctx), item.ID, item.CurrentRevision)
 	if err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	if hasChildren {
-		blockers = append(blockers, "requirement is not a leaf")
+		return domain.Workability{Disposition: "managed_through_children", Reasons: []string{"work is managed through active refinement children"}}, nil
 	}
-	if item.ReconciliationState != domain.NotSatisfied && item.ReconciliationState != domain.NeedsReconciliation {
-		blockers = append(blockers, fmt.Sprintf("reconciliation state is %s", item.ReconciliationState))
+	switch item.ReconciliationState {
+	case domain.InProgress:
+		return domain.Workability{Disposition: "work_in_progress", Reasons: []string{"an active task is in progress"}}, nil
+	case domain.ReadyForReview:
+		return domain.Workability{Disposition: "awaiting_review", Reasons: []string{"the requirement awaits review"}}, nil
+	case domain.Satisfied:
+		return domain.Workability{Disposition: "no_work_required", Reasons: []string{"the requirement is satisfied; no new work is required"}}, nil
+	case domain.NotSatisfied, domain.NeedsReconciliation:
+	default:
+		return domain.Workability{Disposition: "unavailable", Reasons: []string{fmt.Sprintf("reconciliation state %s does not permit work", item.ReconciliationState)}}, nil
 	}
 	var taskIDs []string
 	if err := store.db.WithContext(ctx).Raw(`SELECT t.id FROM task t JOIN task_requirement tr ON tr.task_id=t.id WHERE tr.requirement_id=? AND tr.requirement_revision=? AND t.state='open' ORDER BY t.id`, item.ID, item.CurrentRevision).Scan(&taskIDs).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	for _, id := range taskIDs {
-		blockers = append(blockers, fmt.Sprintf("open task %s already links to the current revision", id))
+		reasons = append(reasons, fmt.Sprintf("open task %s already covers the current revision", id))
 	}
 	type dependency struct {
 		ID, LifecycleState, ReconciliationState string
@@ -715,7 +719,7 @@ SELECT dependency_id,dependency_revision FROM requirement_dependency WHERE requi
 UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency rd JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
 ) SELECT d.id,d.revision,r.current_revision,r.lifecycle_state,r.reconciliation_state FROM deps d LEFT JOIN requirement r ON r.id=d.id ORDER BY d.id,d.revision`
 	if err := store.db.WithContext(ctx).Raw(query, item.ID, item.CurrentRevision).Scan(&dependencies).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	for _, dependency := range dependencies {
 		ref := fmt.Sprintf("%s@%d", dependency.ID, dependency.Revision)
@@ -723,21 +727,24 @@ UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency
 		if dependency.CurrentRevision != 0 {
 			effectiveState, err = effectiveRequirementState(store.db.WithContext(ctx), dependency.ID, dependency.CurrentRevision, effectiveState)
 			if err != nil {
-				return domain.Readiness{}, err
+				return domain.Workability{}, err
 			}
 		}
 		switch {
 		case dependency.CurrentRevision == 0:
-			blockers = append(blockers, ref+" does not exist")
+			reasons = append(reasons, ref+" does not exist")
 		case dependency.CurrentRevision != dependency.Revision:
-			blockers = append(blockers, fmt.Sprintf("%s is stale; current revision is %d", ref, dependency.CurrentRevision))
+			reasons = append(reasons, fmt.Sprintf("%s is stale; current revision is %d", ref, dependency.CurrentRevision))
 		case dependency.LifecycleState != string(domain.Active):
-			blockers = append(blockers, ref+" is retired")
+			reasons = append(reasons, ref+" is retired")
 		case effectiveState != domain.Satisfied:
-			blockers = append(blockers, fmt.Sprintf("%s is %s", ref, effectiveState))
+			reasons = append(reasons, fmt.Sprintf("%s is %s", ref, effectiveState))
 		}
 	}
-	return domain.Readiness{Ready: len(blockers) == 0, Blockers: blockers}, nil
+	if len(reasons) > 0 {
+		return domain.Workability{Disposition: "waiting", Reasons: reasons}, nil
+	}
+	return domain.Workability{Workable: true, Disposition: "ready_for_work", Reasons: []string{"the requirement permits new work"}}, nil
 }
 
 func (store *Store) ReviewRequirement(ctx context.Context, input domain.ReviewInput, actor string) (domain.Requirement, bool, error) {
@@ -1058,6 +1065,11 @@ func (store *Store) getTask(ctx context.Context, id string, detail bool) (domain
 		commit = *row.CompletedCommit
 	}
 	item := domain.Task{ID: row.ID, Version: row.Version, Title: row.Title, Description: row.Description, Priority: row.Priority, State: row.State, Fence: row.Fence, CompletedCommit: commit, Requirements: reqs, DependsOn: deps}
+	workability, err := store.taskWorkability(ctx, item)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	item.Workability = &workability
 	type pullRequestRow struct {
 		Repository string
 		Number     int
@@ -1080,17 +1092,12 @@ func (store *Store) getTask(ctx context.Context, id string, detail bool) (domain
 		return domain.Task{}, err
 	}
 	item.StateHistory = stateHistory
-	readiness, err := store.taskReadiness(ctx, item)
-	if err != nil {
-		return domain.Task{}, err
-	}
-	item.Readiness = &readiness
 	return item, nil
 }
 
-func (store *Store) ListTasks(ctx context.Context, cursor string, limit int, ready bool) (domain.Page[domain.Task], error) {
+func (store *Store) ListTasks(ctx context.Context, cursor string, limit int, workable bool) (domain.Page[domain.Task], error) {
 	query := store.db.WithContext(ctx).Model(&taskRow{}).Where("task.id > ?", cursor)
-	if ready {
+	if workable {
 		query = query.Where("task.state='open'").Order("priority DESC,id")
 	} else {
 		query = query.Order("id")
@@ -1105,12 +1112,8 @@ func (store *Store) ListTasks(ctx context.Context, cursor string, limit int, rea
 		if e != nil {
 			return domain.Page[domain.Task]{}, e
 		}
-		if ready {
-			readiness, err := store.taskReadiness(ctx, t)
-			if err != nil {
-				return domain.Page[domain.Task]{}, err
-			}
-			if !readiness.Ready {
+		if workable {
+			if !t.Workability.Workable {
 				continue
 			}
 		}
@@ -1166,25 +1169,31 @@ ORDER BY d.id,d.revision`
 	return count, nil
 }
 
-func (store *Store) taskReadiness(ctx context.Context, item domain.Task) (domain.Readiness, error) {
-	blockers := []string{}
+func (store *Store) taskWorkability(ctx context.Context, item domain.Task) (domain.Workability, error) {
+	reasons := []string{}
+	if item.State == "complete" {
+		return domain.Workability{Disposition: "complete", Reasons: []string{"the task is complete"}}, nil
+	}
+	if item.State == "closed" {
+		return domain.Workability{Disposition: "closed", Reasons: []string{"the task is closed"}}, nil
+	}
 	if item.State != "open" {
-		blockers = append(blockers, fmt.Sprintf("task state is %s", item.State))
+		return domain.Workability{Disposition: "waiting", Reasons: []string{fmt.Sprintf("task state is %s", item.State)}}, nil
 	}
 	var leases []leaseRow
 	if err := store.db.WithContext(ctx).Where("task_id=? AND expires_at>?", item.ID, now()).Find(&leases).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	if len(leases) > 0 {
-		blockers = append(blockers, fmt.Sprintf("active lease %s belongs to %s", leases[0].LeaseID, leases[0].AgentID))
+		return domain.Workability{Disposition: "work_in_progress", Reasons: []string{fmt.Sprintf("active lease %s belongs to %s", leases[0].LeaseID, leases[0].AgentID)}}, nil
 	}
 	type taskDependency struct{ ID, State string }
 	var taskDependencies []taskDependency
 	if err := store.db.WithContext(ctx).Raw(`SELECT t.id,t.state FROM task_dependency d JOIN task t ON t.id=d.dependency_id WHERE d.task_id=? AND t.state!='complete' ORDER BY t.id`, item.ID).Scan(&taskDependencies).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	for _, dependency := range taskDependencies {
-		blockers = append(blockers, fmt.Sprintf("task dependency %s is %s", dependency.ID, dependency.State))
+		reasons = append(reasons, fmt.Sprintf("task dependency %s is %s", dependency.ID, dependency.State))
 	}
 	type requirementDependency struct {
 		ID, LifecycleState, ReconciliationState string
@@ -1196,7 +1205,7 @@ SELECT rd.dependency_id,rd.dependency_revision FROM task_requirement tr JOIN req
 UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency rd JOIN deps d ON rd.requirement_id=d.id AND rd.requirement_revision=d.revision
 ) SELECT d.id,d.revision,r.current_revision,r.lifecycle_state,r.reconciliation_state FROM deps d LEFT JOIN requirement r ON r.id=d.id ORDER BY d.id,d.revision`
 	if err := store.db.WithContext(ctx).Raw(query, item.ID).Scan(&requirements).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	for _, requirement := range requirements {
 		ref := fmt.Sprintf("%s@%d", requirement.ID, requirement.Revision)
@@ -1205,26 +1214,26 @@ UNION SELECT rd.dependency_id,rd.dependency_revision FROM requirement_dependency
 			var stateErr error
 			effectiveState, stateErr = effectiveRequirementState(store.db.WithContext(ctx), requirement.ID, requirement.CurrentRevision, effectiveState)
 			if stateErr != nil {
-				return domain.Readiness{}, stateErr
+				return domain.Workability{}, stateErr
 			}
 		}
 		switch {
 		case requirement.CurrentRevision == 0:
-			blockers = append(blockers, ref+" does not exist")
+			reasons = append(reasons, ref+" does not exist")
 		case requirement.CurrentRevision != requirement.Revision:
-			blockers = append(blockers, fmt.Sprintf("%s is stale; current revision is %d", ref, requirement.CurrentRevision))
+			reasons = append(reasons, fmt.Sprintf("%s is stale; current revision is %d", ref, requirement.CurrentRevision))
 		case requirement.LifecycleState != string(domain.Active):
-			blockers = append(blockers, ref+" is retired")
+			reasons = append(reasons, ref+" is retired")
 		case effectiveState != domain.Satisfied:
-			blockers = append(blockers, fmt.Sprintf("%s is %s", ref, effectiveState))
+			reasons = append(reasons, fmt.Sprintf("%s is %s", ref, effectiveState))
 		}
 	}
 	var retiredLinks []string
 	if err := store.db.WithContext(ctx).Raw(`SELECT r.id FROM task_requirement tr JOIN requirement r ON r.id=tr.requirement_id WHERE tr.task_id=? AND r.lifecycle_state!='active' ORDER BY r.id`, item.ID).Scan(&retiredLinks).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	for _, id := range retiredLinks {
-		blockers = append(blockers, fmt.Sprintf("linked requirement %s is retired", id))
+		reasons = append(reasons, fmt.Sprintf("linked requirement %s is retired", id))
 	}
 	var nonLeafLinks []string
 	nonLeafQuery := `SELECT DISTINCT tr.requirement_id FROM task_requirement tr
@@ -1237,12 +1246,15 @@ WHERE tr.task_id=? AND EXISTS (
     AND rr.parent_revision=tr.requirement_revision
 ) ORDER BY tr.requirement_id`
 	if err := store.db.WithContext(ctx).Raw(nonLeafQuery, item.ID).Scan(&nonLeafLinks).Error; err != nil {
-		return domain.Readiness{}, err
+		return domain.Workability{}, err
 	}
 	for _, id := range nonLeafLinks {
-		blockers = append(blockers, fmt.Sprintf("linked requirement %s is not a leaf", id))
+		reasons = append(reasons, fmt.Sprintf("linked requirement %s is not a leaf", id))
 	}
-	return domain.Readiness{Ready: len(blockers) == 0, Blockers: blockers}, nil
+	if len(reasons) > 0 {
+		return domain.Workability{Disposition: "waiting", Reasons: reasons}, nil
+	}
+	return domain.Workability{Workable: true, Disposition: "ready_to_lease", Reasons: []string{"the task is ready to lease"}}, nil
 }
 
 func (store *Store) LeaseTask(ctx context.Context, id, agent string, ttl time.Duration, actor string) (domain.Lease, error) {

@@ -126,9 +126,13 @@ func printRequirementList(data json.RawMessage) error {
 		return nil
 	}
 	table := newTable()
-	fmt.Fprintln(table, "ID\tREVISION\tLEVEL\tLIFECYCLE\tRECONCILIATION\tTITLE")
+	fmt.Fprintln(table, "ID\tREVISION\tLEVEL\tLIFECYCLE\tRECONCILIATION\tWORKABLE\tDISPOSITION\tTITLE")
 	for _, item := range items {
-		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\t%s\n", item.ID, item.CurrentRevision, item.Revision.Level, item.LifecycleState, item.ReconciliationState, item.Revision.Title)
+		workable, disposition := false, ""
+		if item.Workability != nil {
+			workable, disposition = item.Workability.Workable, item.Workability.Disposition
+		}
+		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\t%t\t%s\t%s\n", item.ID, item.CurrentRevision, item.Revision.Level, item.LifecycleState, item.ReconciliationState, workable, disposition, item.Revision.Title)
 	}
 	return table.Flush()
 }
@@ -152,7 +156,7 @@ func printRequirement(data json.RawMessage) error {
 		return err
 	}
 	fmt.Printf("\nStatement:\n  %s\n", item.Revision.Statement)
-	printReadiness(item.Readiness)
+	printWorkability(item.Workability)
 	if len(item.OpenCauses) > 0 {
 		fmt.Println("\nOpen reconciliation causes:")
 		for _, cause := range item.OpenCauses {
@@ -418,9 +422,13 @@ func printTaskList(data json.RawMessage) error {
 		return nil
 	}
 	table := newTable()
-	fmt.Fprintln(table, "ID\tSTATE\tPRIORITY\tREQUIREMENTS\tPRS\tTITLE")
+	fmt.Fprintln(table, "ID\tSTATE\tWORKABLE\tDISPOSITION\tPRIORITY\tREQUIREMENTS\tPRS\tTITLE")
 	for _, item := range items {
-		fmt.Fprintf(table, "%s\t%s\t%d\t%d\t%d\t%s\n", item.ID, item.State, item.Priority, len(item.Requirements), len(item.PullRequests), item.Title)
+		workable, disposition := false, ""
+		if item.Workability != nil {
+			workable, disposition = item.Workability.Workable, item.Workability.Disposition
+		}
+		fmt.Fprintf(table, "%s\t%s\t%t\t%s\t%d\t%d\t%d\t%s\n", item.ID, item.State, workable, disposition, item.Priority, len(item.Requirements), len(item.PullRequests), item.Title)
 	}
 	return table.Flush()
 }
@@ -456,22 +464,19 @@ func printTask(data json.RawMessage) error {
 			fmt.Printf("  %s\n", pr.URL)
 		}
 	}
-	printReadiness(item.Readiness)
+	printWorkability(item.Workability)
 	printStateHistory(item.StateHistory)
 	return nil
 }
 
-func printReadiness(readiness *domain.Readiness) {
-	if readiness == nil {
+func printWorkability(workability *domain.Workability) {
+	if workability == nil {
 		return
 	}
-	value := "ready"
-	if !readiness.Ready {
-		value = "blocked"
-	}
-	fmt.Printf("\nReadiness: %s\n", value)
-	for _, blocker := range readiness.Blockers {
-		fmt.Printf("  - %s\n", blocker)
+	fmt.Printf("\nWorkable:     %t\n", workability.Workable)
+	fmt.Printf("Disposition:  %s\n", workability.Disposition)
+	for _, reason := range workability.Reasons {
+		fmt.Printf("  - %s\n", reason)
 	}
 }
 
