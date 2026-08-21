@@ -126,20 +126,47 @@ Usage:
 Usage:
   reqdb requirement get ID[@REVISION] [options]
 `,
-	"requirement check": `Validate a requirement file without a database change.
+	"requirement check": `Validate a requirement without a database change.
 
 Usage:
+  reqdb requirement check ID --level LEVEL --title TITLE --statement STATEMENT [options]
   reqdb requirement check --from-file FILE [options]
+
+Input Options:
+  -f, --from-file FILE       Read YAML from FILE; use - for standard input
+  --level LEVEL              business, stakeholder, system, or software
+  --title TITLE              Requirement title
+  --statement STATEMENT      One requirement obligation
+  --refines ID@REVISION      Parent revision; repeat for more parents
+  --depends-on ID@REVISION   Dependency revision; repeat for more dependencies
 `,
-	"requirement create": `Create a requirement from a YAML file.
+	"requirement create": `Create a requirement.
 
 Usage:
+  reqdb requirement create ID --level LEVEL --title TITLE --statement STATEMENT [options]
   reqdb requirement create --from-file FILE [options]
+
+Input Options:
+  -f, --from-file FILE       Read YAML from FILE; use - for standard input
+  --level LEVEL              business, stakeholder, system, or software
+  --title TITLE              Requirement title
+  --statement STATEMENT      One requirement obligation
+  --refines ID@REVISION      Parent revision; repeat for more parents
+  --depends-on ID@REVISION   Dependency revision; repeat for more dependencies
 `,
 	"requirement update": `Create the next requirement revision.
 
 Usage:
+  reqdb requirement update ID --expected REVISION --level LEVEL --title TITLE --statement STATEMENT [options]
   reqdb requirement update ID --from-file FILE --expected REVISION [options]
+
+Input Options:
+  -f, --from-file FILE       Read YAML from FILE; use - for standard input
+  --level LEVEL              business, stakeholder, system, or software
+  --title TITLE              Requirement title
+  --statement STATEMENT      One requirement obligation
+  --refines ID@REVISION      Parent revision; repeat for more parents
+  --depends-on ID@REVISION   Dependency revision; repeat for more dependencies
 `,
 	"requirement confirm": `Confirm that code matches a requirement revision.
 
@@ -176,10 +203,21 @@ Usage:
 Usage:
   reqdb task get ID [options]
 `,
-	"task create": `Create a task from a YAML file.
+	"task create": `Create a task.
 
 Usage:
+  reqdb task create ID --title TITLE --description TEXT --priority NUMBER --requirement LINK [options]
   reqdb task create --from-file FILE [options]
+
+Input Options:
+  -f, --from-file FILE       Read YAML from FILE; use - for standard input
+  --title TITLE              Task title
+  --description TEXT         Task description
+  --priority NUMBER          Priority from 0 through 100
+  --requirement LINK         REQUIREMENT@REVISION:PURPOSE; repeat for more links
+  --depends-on TASK          Task dependency; repeat for more dependencies
+
+PURPOSE is implement or reconcile.
 `,
 	"task lease": `Lease a ready task to an agent.
 

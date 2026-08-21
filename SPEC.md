@@ -17,7 +17,8 @@ workflows.
 - SQLite shall be the system of record.
 - One server shall own the SQLite file on local storage.
 - All CLI commands shall use the server.
-- YAML shall be an input format only.
+- YAML shall be an input format only. The CLI shall also accept resource
+  attributes as options.
 - Requirement revisions and audit events shall be append-only.
 - Rendered files shall not be authoritative.
 
@@ -206,6 +207,13 @@ events that exceed its configured retention period.
 - Parsers shall reject aliases, anchors, merge keys, and custom tags.
 - A resource `check` action shall validate input without a database change.
 - A resource `create` or `update` action shall validate and store input.
+- Requirement check, create, and update commands and task create commands shall
+  accept resource attributes as CLI options.
+- These commands shall also accept YAML from a file or from standard input.
+- A command shall not combine YAML input with resource attribute options.
+- Refinement, requirement dependency, task requirement, and task dependency
+  options shall be repeatable.
+- File input and option input shall use the same API and domain validation.
 
 ## Server, CLI, and rendering
 
@@ -229,9 +237,9 @@ The core resource commands are:
 | `requirement list` | List requirements. |
 | `requirement ready` | List requirements that are ready for work. |
 | `requirement get ID[@REVISION]` | Show one requirement revision. |
-| `requirement check --from-file FILE` | Validate one requirement file. |
-| `requirement create --from-file FILE` | Create a requirement. |
-| `requirement update ID --from-file FILE` | Create a requirement revision. |
+| `requirement check [ID] [OPTIONS]` | Validate one requirement input. |
+| `requirement create [ID] [OPTIONS]` | Create a requirement. |
+| `requirement update ID [OPTIONS]` | Create a requirement revision. |
 | `requirement confirm ID[@REVISION] --commit SHA` | Confirm that code matches a revision. |
 | `requirement retire ID` | Retire a requirement without deleting its history. |
 | `requirement render ID` | Render one requirement and its context. |

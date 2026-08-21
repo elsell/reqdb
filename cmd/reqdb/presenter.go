@@ -26,7 +26,7 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 
 	switch {
 	case path == "v1/requirements/check":
-		fmt.Println("Requirement file is valid.")
+		fmt.Println("Requirement input is valid.")
 		return nil
 	case path == "v1/requirements" && method == http.MethodGet:
 		return printRequirementList(data)

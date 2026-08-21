@@ -19,7 +19,6 @@ import (
 
 	"github.com/elsell/reqdb/internal/application"
 	"github.com/elsell/reqdb/internal/client"
-	"github.com/elsell/reqdb/internal/domain"
 	"github.com/elsell/reqdb/internal/observability"
 	"github.com/elsell/reqdb/internal/store/sqlite"
 	"github.com/elsell/reqdb/internal/transport/httpapi"
@@ -235,12 +234,9 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 		}
 		return call(ctx, api, http.MethodGet, "/v1/requirements/"+url.PathEscape(args[1]), nil, jsonOutput)
 	case "check", "create":
-		if option(args, "--from-file") == "" {
-			return withHelp("--from-file is required", actionHelp["requirement "+action])
-		}
-		input, err := readRequirement(option(args, "--from-file"))
+		input, err := requirementInput(args, action)
 		if err != nil {
-			return err
+			return withHelp(err.Error(), actionHelp["requirement "+action])
 		}
 		path := "/v1/requirements"
 		if action == "check" {
@@ -251,14 +247,11 @@ func requirement(ctx context.Context, api client.Client, args []string, jsonOutp
 		if len(args) < 2 {
 			return withHelp("a requirement ID is required", actionHelp["requirement update"])
 		}
-		if option(args, "--from-file") == "" {
-			return withHelp("--from-file is required", actionHelp["requirement update"])
-		}
-		input, err := readRequirement(option(args, "--from-file"))
-		if err != nil {
-			return err
-		}
 		expected, err := requiredInt(args, "--expected")
+		if err != nil {
+			return withHelp(err.Error(), actionHelp["requirement update"])
+		}
+		input, err := requirementInput(args, action)
 		if err != nil {
 			return withHelp(err.Error(), actionHelp["requirement update"])
 		}
@@ -315,12 +308,9 @@ func task(ctx context.Context, api client.Client, args []string, jsonOutput bool
 		}
 		return call(ctx, api, http.MethodGet, "/v1/tasks/"+url.PathEscape(args[1]), nil, jsonOutput)
 	case "create":
-		if option(args, "--from-file") == "" {
-			return withHelp("--from-file is required", actionHelp["task create"])
-		}
-		input, err := readTask(option(args, "--from-file"))
+		input, err := taskInput(args)
 		if err != nil {
-			return err
+			return withHelp(err.Error(), actionHelp["task create"])
 		}
 		return call(ctx, api, http.MethodPost, "/v1/tasks", input, jsonOutput)
 	case "lease":
@@ -415,22 +405,6 @@ func sentence(value string) string {
 		return "The request failed"
 	}
 	return strings.ToUpper(value[:1]) + value[1:]
-}
-func readRequirement(path string) (domain.RequirementInput, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return domain.RequirementInput{}, err
-	}
-	defer file.Close()
-	return application.DecodeRequirement(file)
-}
-func readTask(path string) (domain.TaskInput, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return domain.TaskInput{}, err
-	}
-	defer file.Close()
-	return application.DecodeTask(file)
 }
 func option(args []string, name string) string {
 	for i, value := range args {
