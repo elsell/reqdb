@@ -60,6 +60,57 @@ func TestAPIEnvelopeAndCorrelationID(t *testing.T) {
 	}
 }
 
+func TestReviewReadEndpoints(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	input := domain.RequirementInput{Schema: "requirement/v1", ID: "SWR-REVIEW-API-001", Level: "software", Revision: 1, Title: "Read reviews", Statement: "The software shall return one review."}
+	if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	item, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: strings.Repeat("a", 40), Verdict: "accept"}, "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewID := item.Reviews[0].ID
+	api := httpapi.API{Service: application.Service{Store: store, Auth: application.AllowAll{}}}
+	server := httptest.NewServer(api.Handler())
+	t.Cleanup(server.Close)
+
+	response, err := http.Get(server.URL + "/v1/reviews/" + reviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var one struct {
+		Data domain.Review `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&one); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || one.Data.ID != reviewID || one.Data.Requirement != (domain.RequirementRef{ID: input.ID, Revision: 1}) {
+		t.Fatalf("unexpected review response: status=%d data=%+v", response.StatusCode, one.Data)
+	}
+
+	response, err = http.Get(server.URL + "/v1/requirements/" + input.ID + "@1/reviews?limit=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Data []domain.Review `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || len(list.Data) != 1 || list.Data[0].ID != reviewID {
+		t.Fatalf("unexpected review list: status=%d data=%+v", response.StatusCode, list.Data)
+	}
+}
+
 func TestEventStreamPublishesChanges(t *testing.T) {
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
 	if err != nil {

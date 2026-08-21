@@ -213,13 +213,14 @@ type StateChange struct {
 }
 
 type Review struct {
-	ID         string          `json:"id"`
-	Verdict    string          `json:"verdict"`
-	Commit     string          `json:"commit"`
-	TaskID     string          `json:"task_id,omitempty"`
-	Findings   []ReviewFinding `json:"findings,omitempty"`
-	ReviewedAt time.Time       `json:"reviewed_at"`
-	ReviewerID string          `json:"reviewer_id"`
+	ID          string          `json:"id"`
+	Requirement RequirementRef  `json:"requirement"`
+	Verdict     string          `json:"verdict"`
+	Commit      string          `json:"commit"`
+	TaskID      string          `json:"task_id,omitempty"`
+	Findings    []ReviewFinding `json:"findings,omitempty"`
+	ReviewedAt  time.Time       `json:"reviewed_at"`
+	ReviewerID  string          `json:"reviewer_id"`
 }
 
 type ReviewFinding struct {

@@ -34,6 +34,8 @@ type Store interface {
 	ListRequirements(context.Context, string, int, string, string) (domain.Page[domain.Requirement], error)
 	ListReadyRequirements(context.Context, string, int) (domain.Page[domain.Requirement], error)
 	ReviewRequirement(context.Context, domain.ReviewInput, string) (domain.Requirement, bool, error)
+	GetReview(context.Context, string) (domain.Review, error)
+	ListReviews(context.Context, domain.RequirementRef, string, int) (domain.Page[domain.Review], error)
 	RetireRequirement(context.Context, string, string) (domain.Requirement, error)
 	Trace(context.Context, string) ([]domain.Requirement, error)
 	Impact(context.Context, string) ([]domain.Requirement, error)

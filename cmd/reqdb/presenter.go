@@ -30,8 +30,12 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 		return nil
 	case path == "v1/requirements" && method == http.MethodGet:
 		return printRequirementList(data)
+	case len(parts) == 4 && parts[1] == "requirements" && parts[3] == "reviews" && method == http.MethodGet:
+		return printReviewList(data)
 	case parts[0] == "v1" && len(parts) >= 2 && parts[1] == "requirements":
 		return printRequirement(data)
+	case len(parts) == 3 && parts[1] == "reviews":
+		return printReview(data)
 	case path == "v1/tasks" && method == http.MethodGet:
 		return printTaskList(data)
 	case len(parts) >= 3 && parts[1] == "tasks" && parts[len(parts)-1] == "lease":
@@ -56,6 +60,59 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 		return printImpact(data)
 	default:
 		return fmt.Errorf("no human output format for %s %s", method, parsed.Path)
+	}
+}
+
+func printReview(data json.RawMessage) error {
+	var item domain.Review
+	if err := json.Unmarshal(data, &item); err != nil {
+		return err
+	}
+	fmt.Printf("Review %s\n\n", item.ID)
+	fields := newTable()
+	fmt.Fprintf(fields, "Requirement:\t%s@%d\n", item.Requirement.ID, item.Requirement.Revision)
+	fmt.Fprintf(fields, "Verdict:\t%s\n", item.Verdict)
+	fmt.Fprintf(fields, "Commit:\t%s\n", item.Commit)
+	fmt.Fprintf(fields, "Task:\t%s\n", valueOrDash(item.TaskID))
+	fmt.Fprintf(fields, "Reviewed:\t%s\n", displayTime(item.ReviewedAt))
+	fmt.Fprintf(fields, "Reviewer:\t%s\n", item.ReviewerID)
+	_ = fields.Flush()
+	printReviewFindings(item.Findings)
+	return nil
+}
+
+func printReviewList(data json.RawMessage) error {
+	var items []domain.Review
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		fmt.Println("No reviews found.")
+		return nil
+	}
+	table := newTable()
+	fmt.Fprintln(table, "ID\tREQUIREMENT\tTIME\tVERDICT\tCOMMIT\tTASK\tREVIEWER")
+	for _, item := range items {
+		fmt.Fprintf(table, "%s\t%s@%d\t%s\t%s\t%s\t%s\t%s\n", item.ID, item.Requirement.ID, item.Requirement.Revision, displayTime(item.ReviewedAt), item.Verdict, item.Commit, item.TaskID, item.ReviewerID)
+	}
+	return table.Flush()
+}
+
+func printReviewFindings(findings []domain.ReviewFinding) {
+	if len(findings) == 0 {
+		return
+	}
+	fmt.Println("\nFindings:")
+	for _, finding := range findings {
+		location := finding.Path
+		if finding.Line > 0 {
+			location = fmt.Sprintf("%s:%d", finding.Path, finding.Line)
+		}
+		if location == "" {
+			fmt.Printf("  - %s\n", finding.Message)
+		} else {
+			fmt.Printf("  - %s (%s)\n", finding.Message, location)
+		}
 	}
 }
 
@@ -498,6 +555,13 @@ func valueList(items []string) string {
 	}
 	sort.Strings(items)
 	return strings.Join(items, ", ")
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "—"
+	}
+	return value
 }
 
 func displayTime(value time.Time) string {

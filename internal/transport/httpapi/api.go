@@ -107,6 +107,8 @@ func (api API) route(w http.ResponseWriter, r *http.Request) {
 		api.tasks(w, r, parts[1:])
 	case "leases":
 		api.leases(w, r, parts[1:])
+	case "reviews":
+		api.reviews(w, r, parts[1:])
 	case "trace":
 		api.trace(w, r, parts[1:])
 	case "impact":
@@ -120,6 +122,19 @@ func (api API) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, r, domain.ErrNotFound)
 	}
+}
+
+func (api API) reviews(w http.ResponseWriter, r *http.Request, parts []string) {
+	if r.Method != http.MethodGet || len(parts) != 1 {
+		fail(w, r, domain.ErrNotFound)
+		return
+	}
+	item, err := api.Service.GetReview(r.Context(), parts[0], actor(r))
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	write(w, r, http.StatusOK, item, "")
 }
 
 func (api API) events(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +286,15 @@ func (api API) requirements(w http.ResponseWriter, r *http.Request, parts []stri
 			return
 		}
 		write(w, r, 200, item, "")
+		return
+	}
+	if len(parts) == 2 && parts[1] == "reviews" && r.Method == http.MethodGet {
+		page, err := api.Service.ListReviews(r.Context(), ref, r.URL.Query().Get("cursor"), limit(r), actor(r))
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		write(w, r, http.StatusOK, page.Items, page.NextCursor)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "retire" && r.Method == http.MethodPost {

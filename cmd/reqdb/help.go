@@ -9,6 +9,7 @@ Usage:
 
 Core Commands:
   requirement   Manage requirements and reconciliation
+  review        Read immutable requirement reviews
   task          Manage implementation tasks
   lease         Maintain active task leases
 
@@ -68,6 +69,18 @@ Actions:
 Use "reqdb task ACTION --help" for action options.
 `
 
+const reviewHelp = `Read immutable requirement reviews.
+
+Usage:
+  reqdb review ACTION [arguments] [options]
+
+Actions:
+  get    Show one review
+  list   List reviews for one requirement
+
+Use "reqdb review ACTION --help" for action options.
+`
+
 const leaseHelp = `Maintain a task lease.
 
 Usage:
@@ -105,6 +118,16 @@ Global Options:
 `
 
 var actionHelp = map[string]string{
+	"review get": `Show one review.
+
+Usage:
+  reqdb review get REVIEW_ID [options]
+`,
+	"review list": `List reviews for one requirement.
+
+Usage:
+  reqdb review list REQUIREMENT_ID[@REVISION] [--cursor REVIEW_ID] [options]
+`,
 	"requirement list": `List requirements.
 
 Usage:
@@ -312,6 +335,8 @@ func helpFor(args []string) string {
 	switch args[0] {
 	case "requirement":
 		return requirementHelp
+	case "review":
+		return reviewHelp
 	case "task":
 		return taskHelp
 	case "lease":
@@ -330,7 +355,7 @@ func isHelpRequest(args []string) bool {
 	if len(args) == 0 || args[0] == "help" {
 		return true
 	}
-	if len(args) == 1 && (args[0] == "requirement" || args[0] == "task" || args[0] == "lease") {
+	if len(args) == 1 && (args[0] == "requirement" || args[0] == "review" || args[0] == "task" || args[0] == "lease") {
 		return true
 	}
 	return has(args, "-h") || has(args, "--help")

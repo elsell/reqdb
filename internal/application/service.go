@@ -201,6 +201,21 @@ func (service Service) ReviewRequirement(ctx context.Context, input domain.Revie
 	}
 	return item, err
 }
+func (service Service) GetReview(ctx context.Context, id, actor string) (domain.Review, error) {
+	if err := service.authorize(ctx, actor, "review.read", id); err != nil {
+		return domain.Review{}, err
+	}
+	return service.Store.GetReview(ctx, id)
+}
+func (service Service) ListReviews(ctx context.Context, requirement domain.RequirementRef, cursor string, limit int, actor string) (domain.Page[domain.Review], error) {
+	if err := service.authorize(ctx, actor, "review.read", requirement.ID); err != nil {
+		return domain.Page[domain.Review]{}, err
+	}
+	if requirement.ID == "" {
+		return domain.Page[domain.Review]{}, errors.New("requirement ID is required")
+	}
+	return service.Store.ListReviews(ctx, requirement, cursor, limit)
+}
 func (service Service) RetireRequirement(ctx context.Context, id, actor string) (domain.Requirement, error) {
 	if err := service.authorize(ctx, actor, "requirement.retire", id); err != nil {
 		return domain.Requirement{}, err

@@ -65,6 +65,21 @@ func TestReviewVerdictsFindingsAndIdempotency(t *testing.T) {
 	if accepted.ReconciliationState != domain.Satisfied || len(accepted.Reviews) != 2 {
 		t.Fatalf("unexpected accepted review: %+v", accepted)
 	}
+	if accepted.Reviews[0].Requirement != (domain.RequirementRef{ID: input.ID, Revision: 1}) {
+		t.Fatalf("review does not identify its requirement: %+v", accepted.Reviews[0])
+	}
+	stored, err := store.GetReview(ctx, first.Reviews[0].ID)
+	if err != nil || stored.Requirement.ID != input.ID || len(stored.Findings) != 1 {
+		t.Fatalf("get review returned %+v, %v", stored, err)
+	}
+	page, err := store.ListReviews(ctx, domain.RequirementRef{ID: input.ID, Revision: 1}, "", 1)
+	if err != nil || len(page.Items) != 1 || page.NextCursor == "" {
+		t.Fatalf("first review page returned %+v, %v", page, err)
+	}
+	next, err := store.ListReviews(ctx, domain.RequirementRef{ID: input.ID, Revision: 1}, page.NextCursor, 1)
+	if err != nil || len(next.Items) != 1 || next.Items[0].ID == page.Items[0].ID {
+		t.Fatalf("second review page returned %+v, %v", next, err)
+	}
 }
 
 func TestReviewTaskMustMatchRevisionAndCommit(t *testing.T) {

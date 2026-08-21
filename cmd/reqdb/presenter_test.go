@@ -58,6 +58,24 @@ func TestRequirementDetailUsesFields(t *testing.T) {
 	}
 }
 
+func TestReviewOutputsUseFieldsAndTables(t *testing.T) {
+	review := domain.Review{ID: "RV-1", Requirement: domain.RequirementRef{ID: "SWR-TEST-001", Revision: 2}, Verdict: "reject", Commit: strings.Repeat("a", 40), ReviewerID: "reviewer", ReviewedAt: time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC), Findings: []domain.ReviewFinding{{Message: "The result is incomplete.", Path: "result.go", Line: 12}}}
+	data, _ := json.Marshal(review)
+	detail := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/reviews/RV-1", data) })
+	for _, text := range []string{"Review RV-1", "SWR-TEST-001@2", "reject", "The result is incomplete.", "result.go:12"} {
+		if !strings.Contains(detail, text) {
+			t.Fatalf("review detail does not contain %q: %s", text, detail)
+		}
+	}
+	listData, _ := json.Marshal([]domain.Review{review})
+	list := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/requirements/SWR-TEST-001/reviews", listData) })
+	for _, text := range []string{"ID", "REQUIREMENT", "SWR-TEST-001@2", "RV-1"} {
+		if !strings.Contains(list, text) {
+			t.Fatalf("review list does not contain %q: %s", text, list)
+		}
+	}
+}
+
 func TestTraceUsesTreeBranches(t *testing.T) {
 	root := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Root"}}
 	child := domain.Requirement{ID: "STR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "stakeholder", Title: "Child", Parents: []domain.RequirementRef{{ID: root.ID, Revision: 1}}}}

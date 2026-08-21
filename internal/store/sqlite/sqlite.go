@@ -583,9 +583,10 @@ func (store *Store) stateHistory(ctx context.Context, entityType, entityID strin
 func (store *Store) reviews(ctx context.Context, requirementID string) ([]domain.Review, error) {
 	type row struct {
 		ID, Verdict, CommitSHA, TaskID, ReviewedAt, ReviewerID string
+		RequirementRevision                                    int
 	}
 	var rows []row
-	query := `SELECT id,verdict,commit_sha,COALESCE(task_id,'') AS task_id,reviewed_at,reviewer_id
+	query := `SELECT id,requirement_revision,verdict,commit_sha,COALESCE(task_id,'') AS task_id,reviewed_at,reviewer_id
 FROM requirement_review WHERE requirement_id=? ORDER BY reviewed_at,id`
 	if err := store.db.WithContext(ctx).Raw(query, requirementID).Scan(&rows).Error; err != nil {
 		return nil, err
@@ -593,13 +594,72 @@ FROM requirement_review WHERE requirement_id=? ORDER BY reviewed_at,id`
 	items := make([]domain.Review, 0, len(rows))
 	for _, row := range rows {
 		reviewed, _ := time.Parse(time.RFC3339Nano, row.ReviewedAt)
-		item := domain.Review{ID: row.ID, Verdict: row.Verdict, Commit: row.CommitSHA, TaskID: row.TaskID, ReviewedAt: reviewed, ReviewerID: row.ReviewerID}
+		item := domain.Review{ID: row.ID, Requirement: domain.RequirementRef{ID: requirementID, Revision: row.RequirementRevision}, Verdict: row.Verdict, Commit: row.CommitSHA, TaskID: row.TaskID, ReviewedAt: reviewed, ReviewerID: row.ReviewerID}
 		if err := store.db.WithContext(ctx).Raw(`SELECT message,path,line FROM review_finding WHERE review_id=? ORDER BY ordinal`, row.ID).Scan(&item.Findings).Error; err != nil {
 			return nil, err
 		}
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (store *Store) GetReview(ctx context.Context, id string) (domain.Review, error) {
+	type row struct {
+		ID, RequirementID, Verdict, CommitSHA, TaskID, ReviewedAt, ReviewerID string
+		RequirementRevision                                                   int
+	}
+	var value row
+	if err := store.db.WithContext(ctx).Raw(`SELECT id,requirement_id,requirement_revision,verdict,commit_sha,COALESCE(task_id,'') AS task_id,reviewed_at,reviewer_id FROM requirement_review WHERE id=?`, id).Scan(&value).Error; err != nil {
+		return domain.Review{}, err
+	}
+	if value.ID == "" {
+		return domain.Review{}, ErrNotFound
+	}
+	reviewed, _ := time.Parse(time.RFC3339Nano, value.ReviewedAt)
+	item := domain.Review{ID: value.ID, Requirement: domain.RequirementRef{ID: value.RequirementID, Revision: value.RequirementRevision}, Verdict: value.Verdict, Commit: value.CommitSHA, TaskID: value.TaskID, ReviewedAt: reviewed, ReviewerID: value.ReviewerID}
+	if err := store.db.WithContext(ctx).Raw(`SELECT message,path,line FROM review_finding WHERE review_id=? ORDER BY ordinal`, id).Scan(&item.Findings).Error; err != nil {
+		return domain.Review{}, err
+	}
+	return item, nil
+}
+
+func (store *Store) ListReviews(ctx context.Context, requirement domain.RequirementRef, cursor string, limit int) (domain.Page[domain.Review], error) {
+	query := store.db.WithContext(ctx).Table("requirement_review").Where("requirement_id=?", requirement.ID)
+	if requirement.Revision > 0 {
+		query = query.Where("requirement_revision=?", requirement.Revision)
+	}
+	if cursor != "" {
+		var cursorRow struct{ ReviewedAt string }
+		cursorQuery := store.db.WithContext(ctx).Table("requirement_review").Select("reviewed_at").Where("id=? AND requirement_id=?", cursor, requirement.ID)
+		if requirement.Revision > 0 {
+			cursorQuery = cursorQuery.Where("requirement_revision=?", requirement.Revision)
+		}
+		if err := cursorQuery.Scan(&cursorRow).Error; err != nil {
+			return domain.Page[domain.Review]{}, err
+		}
+		if cursorRow.ReviewedAt == "" {
+			return domain.Page[domain.Review]{}, ErrNotFound
+		}
+		query = query.Where("reviewed_at>? OR (reviewed_at=? AND id>?)", cursorRow.ReviewedAt, cursorRow.ReviewedAt, cursor)
+	}
+	type row struct{ ID string }
+	var rows []row
+	if err := query.Select("id").Order("reviewed_at,id").Limit(limit + 1).Scan(&rows).Error; err != nil {
+		return domain.Page[domain.Review]{}, err
+	}
+	page := domain.Page[domain.Review]{Items: []domain.Review{}}
+	if len(rows) > limit {
+		page.NextCursor = rows[limit-1].ID
+		rows = rows[:limit]
+	}
+	for _, row := range rows {
+		item, err := store.GetReview(ctx, row.ID)
+		if err != nil {
+			return domain.Page[domain.Review]{}, err
+		}
+		page.Items = append(page.Items, item)
+	}
+	return page, nil
 }
 
 func (store *Store) openCauses(ctx context.Context, requirementID string, revision int) ([]domain.ReconciliationCause, error) {

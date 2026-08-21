@@ -50,7 +50,7 @@ func run(args []string) error {
 	if args[0] == "serve" {
 		return serve(args[1:])
 	}
-	known := map[string]bool{"requirement": true, "task": true, "lease": true, "trace": true, "impact": true, "audit": true, "render": true}
+	known := map[string]bool{"requirement": true, "review": true, "task": true, "lease": true, "trace": true, "impact": true, "audit": true, "render": true}
 	if !known[args[0]] {
 		return withHelp(fmt.Sprintf("unknown command %q", args[0]), rootHelp)
 	}
@@ -71,6 +71,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "requirement":
 		return requirement(ctx, api, args[1:], jsonOutput)
+	case "review":
+		return review(ctx, api, args[1:], jsonOutput)
 	case "task":
 		return task(ctx, api, args[1:], jsonOutput)
 	case "lease":
@@ -100,6 +102,24 @@ func run(args []string) error {
 		return err
 	default:
 		return withHelp(fmt.Sprintf("unknown command %q", args[0]), rootHelp)
+	}
+}
+
+func review(ctx context.Context, api client.Client, args []string, jsonOutput bool) error {
+	if len(args) == 0 {
+		return withHelp("a review action is required", reviewHelp)
+	}
+	if len(args) < 2 {
+		return withHelp("an ID is required", actionHelp["review "+args[0]])
+	}
+	switch args[0] {
+	case "get":
+		return call(ctx, api, http.MethodGet, "/v1/reviews/"+url.PathEscape(args[1]), nil, jsonOutput)
+	case "list":
+		path := "/v1/requirements/" + url.PathEscape(args[1]) + "/reviews?cursor=" + url.QueryEscape(option(args, "--cursor"))
+		return call(ctx, api, http.MethodGet, path, nil, jsonOutput)
+	default:
+		return withHelp(fmt.Sprintf("unknown review action %q", args[0]), reviewHelp)
 	}
 }
 

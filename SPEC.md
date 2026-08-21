@@ -114,6 +114,11 @@ A review shall be an immutable record for one current, active leaf requirement
 revision and one full Git commit. It shall contain a server-generated ID, the
 reviewer, the review time, and the verdict `accept` or `reject`.
 
+Each review response shall include the exact requirement ID and revision. The
+API shall return one review by its stable ID. It shall list reviews for one
+requirement in review time and ID order with cursor pagination. A revision in
+the requirement reference shall limit the list to that revision.
+
 A rejected review shall contain one or more findings. Each finding shall have a
 message. It can have a path and positive line. Findings shall use normalized
 rows, not raw JSON.
@@ -243,6 +248,8 @@ The core resource commands are:
 | `requirement create [ID] [OPTIONS]` | Create a requirement. |
 | `requirement update ID [OPTIONS]` | Create a requirement revision. |
 | `requirement review ID[@REVISION] --commit SHA --verdict VERDICT` | Accept or reject code for a revision. |
+| `review get ID` | Show one immutable review. |
+| `review list REQUIREMENT[@REVISION]` | List reviews for one requirement. |
 | `requirement retire ID` | Retire a requirement without deleting its history. |
 | `requirement render ID` | Render one requirement and its context. |
 | `task list` | List tasks. |
