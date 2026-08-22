@@ -23,6 +23,7 @@ Other Commands:
   project       List, create, inspect, or select projects
   audit         List audit events
   serve         Start the API server
+  version       Show build version information
   help          Show help for a command
 
 Global Options:

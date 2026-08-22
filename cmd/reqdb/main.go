@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/elsell/reqdb/internal/application"
+	"github.com/elsell/reqdb/internal/buildinfo"
 	"github.com/elsell/reqdb/internal/client"
 	"github.com/elsell/reqdb/internal/observability"
 	"github.com/elsell/reqdb/internal/store/sqlite"
@@ -40,6 +41,10 @@ func main() {
 
 func run(args []string) error {
 	args = normalizeGlobalArgs(args)
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		fmt.Println(buildinfo.String())
+		return nil
+	}
 	if isHelpRequest(args) {
 		if len(args) > 0 && args[0] == "help" {
 			args = args[1:]
@@ -189,7 +194,7 @@ func serve(args []string) error {
 	service := application.Service{Store: store, Auth: application.AllowAll{}, Events: events, LeaseWake: leaseWake}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", httpapi.API{Service: service, Events: broker, Password: password}.Handler())
-	mux.Handle("/", webui.Handler())
+	mux.Handle("/", webui.Handler(buildinfo.Version))
 	handler := mux
 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	server.RegisterOnShutdown(broker.Close)

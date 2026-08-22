@@ -11,7 +11,7 @@ import (
 )
 
 func TestEmbeddedUI(t *testing.T) {
-	server := httptest.NewServer(webui.Handler())
+	server := httptest.NewServer(webui.Handler("1.2.3"))
 	t.Cleanup(server.Close)
 
 	response, err := http.Get(server.URL + "/")
@@ -25,6 +25,9 @@ func TestEmbeddedUI(t *testing.T) {
 	}
 	if response.Header.Get("Content-Security-Policy") == "" {
 		t.Fatal("content security policy is missing")
+	}
+	if !strings.Contains(string(body), `id="version">v1.2.3`) {
+		t.Fatal("UI does not contain the build version")
 	}
 	if strings.Contains(string(body), "software") || strings.Contains(string(body), "SWR-") {
 		t.Fatal("UI contains the removed requirement level")

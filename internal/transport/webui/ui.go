@@ -3,6 +3,7 @@ package webui
 import (
 	"bytes"
 	"embed"
+	"html"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -12,7 +13,7 @@ import (
 //go:embed assets/*
 var files embed.FS
 
-func Handler() http.Handler {
+func Handler(version ...string) http.Handler {
 	assets, err := fs.Sub(files, "assets")
 	if err != nil {
 		panic(err)
@@ -21,6 +22,11 @@ func Handler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
+	value := "dev"
+	if len(version) > 0 && version[0] != "" {
+		value = version[0]
+	}
+	index = bytes.ReplaceAll(index, []byte("{{VERSION}}"), []byte(html.EscapeString(value)))
 	static := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

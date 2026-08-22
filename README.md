@@ -52,3 +52,15 @@ Use `--project ID` or `REQDB_PROJECT` to override the saved project and `--json`
 for machine-readable output. Use `--actor ID` to label the actor in the audit
 log; with a shared password this label is caller-supplied rather than a verified
 identity. Use HTTPS whenever the server is accessed over a network.
+
+Print the embedded build version with `build/reqdb version`. Released container
+images show the same version in the web header and are published to
+`ghcr.io/elsell/reqdb` with `latest`, semantic-version, and commit-SHA tags.
+
+## Releases
+
+Pushes to `main` update a release-please pull request from Conventional Commit
+messages. Merging that pull request creates the GitHub release and publishes an
+amd64 image. Configure the `RELEASE_PLEASE_TOKEN` Actions secret
+with a GitHub token that can create repository contents and pull requests; the
+workflow uses the built-in `GITHUB_TOKEN` only to publish the image to GHCR.
