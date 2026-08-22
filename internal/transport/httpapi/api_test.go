@@ -73,6 +73,47 @@ func TestAPIEnvelopeAndCorrelationID(t *testing.T) {
 	}
 }
 
+func TestBearerAuthenticationAndProjectRoutes(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	api := httpapi.API{Service: application.Service{Store: store, Auth: application.AllowAll{}}, Password: "secret"}
+	server := httptest.NewServer(api.Handler())
+	t.Cleanup(server.Close)
+	response, err := http.Get(server.URL + "/v1/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized || response.Header.Get("WWW-Authenticate") == "" {
+		t.Fatalf("unauthorized response: %d", response.StatusCode)
+	}
+	body := strings.NewReader(`{"id":"alpha","name":"Alpha"}`)
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/projects", body)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("create project status %d", response.StatusCode)
+	}
+	request, _ = http.NewRequest(http.MethodGet, server.URL+"/v1/projects/alpha/requirements", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("nested resource status %d", response.StatusCode)
+	}
+}
+
 func TestReviewReadEndpoints(t *testing.T) {
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
 	if err != nil {

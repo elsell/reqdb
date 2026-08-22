@@ -50,7 +50,7 @@ func run(args []string) error {
 	if args[0] == "serve" {
 		return serve(args[1:])
 	}
-	known := map[string]bool{"requirement": true, "review": true, "task": true, "lease": true, "trace": true, "impact": true, "audit": true, "render": true}
+	known := map[string]bool{"login": true, "project": true, "requirement": true, "review": true, "task": true, "lease": true, "trace": true, "impact": true, "audit": true, "render": true}
 	if !known[args[0]] {
 		return withHelp(fmt.Sprintf("unknown command %q", args[0]), rootHelp)
 	}
@@ -61,13 +61,47 @@ func run(args []string) error {
 	if server == "" {
 		server = "http://127.0.0.1:8080"
 	}
+	canonical, err := canonicalServer(server)
+	if err != nil {
+		return err
+	}
+	server = canonical
+	if args[0] == "login" {
+		return login(server)
+	}
+	credentials, err := loadCredentials()
+	if err != nil {
+		return err
+	}
+	saved := credentials.Servers[server]
+	token := os.Getenv("REQDB_TOKEN")
+	if token == "" {
+		token = saved.Token
+	}
 	actor := option(args, "--actor")
 	if actor == "" {
 		actor = "anonymous"
 	}
-	api := client.Client{BaseURL: server, ActorID: actor, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	api := client.Client{BaseURL: server, ActorID: actor, Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}}
 	jsonOutput := has(args, "--json")
 	ctx := context.Background()
+	if args[0] == "project" {
+		return projectCommand(ctx, api, args[1:], jsonOutput, credentials)
+	}
+	projectID := option(args, "--project")
+	if projectID == "" {
+		projectID = os.Getenv("REQDB_PROJECT")
+	}
+	if projectID == "" {
+		projectID = saved.Project
+	}
+	if projectID == "" {
+		projectID, err = singleProject(ctx, api)
+		if err != nil {
+			return err
+		}
+	}
+	api.Project = projectID
 	switch args[0] {
 	case "requirement":
 		return requirement(ctx, api, args[1:], jsonOutput)
@@ -139,6 +173,10 @@ func serve(args []string) error {
 	if *retention < 1 {
 		return withHelp("audit retention must be positive", serveHelp)
 	}
+	password := os.Getenv("REQDB_PASSWORD")
+	if password == "" {
+		return errors.New("REQDB_PASSWORD must be set")
+	}
 	store, err := sqlite.Open(*dbPath)
 	if err != nil {
 		return err
@@ -150,7 +188,7 @@ func serve(args []string) error {
 	leaseWake := make(chan struct{}, 1)
 	service := application.Service{Store: store, Auth: application.AllowAll{}, Events: events, LeaseWake: leaseWake}
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", httpapi.API{Service: service, Events: broker}.Handler())
+	mux.Handle("/v1/", httpapi.API{Service: service, Events: broker, Password: password}.Handler())
 	mux.Handle("/", webui.Handler())
 	handler := mux
 	server := &http.Server{Addr: *listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
@@ -446,13 +484,13 @@ func normalizeGlobalArgs(args []string) []string {
 		switch {
 		case value == "--json":
 			globals = append(globals, value)
-		case value == "--server" || value == "--actor":
+		case value == "--server" || value == "--actor" || value == "--project":
 			globals = append(globals, value)
 			if i+1 < len(args) {
 				i++
 				globals = append(globals, args[i])
 			}
-		case strings.HasPrefix(value, "--server=") || strings.HasPrefix(value, "--actor="):
+		case strings.HasPrefix(value, "--server=") || strings.HasPrefix(value, "--actor=") || strings.HasPrefix(value, "--project="):
 			globals = append(globals, value)
 		default:
 			positionals = append(positionals, value)

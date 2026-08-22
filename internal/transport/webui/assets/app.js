@@ -2,6 +2,7 @@
 
 const state = {
   requirements: [], tasks: [], leases: [], events: [], filter: "", statusFilter: "", refreshTimer: 0, selected: null, initialized: false,
+  token: localStorage.getItem("reqdb.token") || "", project: localStorage.getItem("reqdb.project") || "", eventAbort: null,
   collapsed: new Set(), collapsedGroups: new Set(), details: new Map(),
 };
 const elements = {
@@ -13,6 +14,7 @@ const elements = {
   refresh: document.querySelector("#refresh"), filter: document.querySelector("#filter"),
   expandAll: document.querySelector("#expand-all"), collapseAll: document.querySelector("#collapse-all"),
   connectionDot: document.querySelector("#connection-dot"), connectionText: document.querySelector("#connection-text"),
+  project: document.querySelector("#project"), logout: document.querySelector("#logout"),
 };
 let describeRequirement;
 let describeTask;
@@ -86,8 +88,19 @@ function actionIcon(label) {
   return "more";
 }
 
+function apiPath(path) {
+  if (!state.project || !path.startsWith("/v1/") || path.startsWith("/v1/projects") || path.startsWith("/v1/auth/")) return path;
+  return `/v1/projects/${encodeURIComponent(state.project)}${path.slice(3)}`;
+}
+
+async function authenticatedFetch(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${state.token}`);
+  return fetch(apiPath(path), { ...options, headers });
+}
+
 async function fetchPage(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  const response = await authenticatedFetch(path, { headers: { Accept: "application/json" } });
   const envelope = await response.json();
   if (!response.ok || envelope.error) throw new Error(envelope.error?.message || `Request failed with status ${response.status}`);
   return envelope;
@@ -163,7 +176,7 @@ function filterActive() { return Boolean(state.filter || state.statusFilter); }
 
 async function mutate(path, body) {
   try {
-    const response = await fetch(path, {
+    const response = await authenticatedFetch(path, {
       method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const envelope = await response.json();
@@ -691,28 +704,44 @@ function renderSummary() {
 
 function render() { renderExplorer(); renderDetails(); renderLeases(); renderEvents(); renderSummary(); }
 
-function connect() {
-  const events = new EventSource("/v1/events");
-  events.addEventListener("ready", () => {
-    elements.connectionDot.className = "connection-dot online";
-    elements.connectionText.textContent = "Live";
-  });
-  events.addEventListener("change", event => {
-    try {
-      const change = JSON.parse(event.data);
-      change.received_at = new Date().toISOString();
-      state.events.unshift(change);
-      state.events = state.events.slice(0, 100);
-      renderEvents();
-    } catch (_) {
-      // A malformed notification can still trigger a state refresh.
+async function connect() {
+  if (state.eventAbort) state.eventAbort.abort();
+  state.eventAbort = new AbortController();
+  try {
+    const response = await authenticatedFetch("/v1/events", { headers: { Accept: "text/event-stream" }, signal: state.eventAbort.signal });
+    if (!response.ok) throw new Error(`Event stream failed with status ${response.status}`);
+    elements.connectionDot.className = "connection-dot online"; elements.connectionText.textContent = "Live";
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
+      const messages = buffer.split("\n\n"); buffer = messages.pop();
+      for (const message of messages) {
+        const type = message.split("\n").find(line => line.startsWith("event:"))?.slice(6).trim();
+        const data = message.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("\n");
+        if (type !== "change" || !data) continue;
+        try { const change = JSON.parse(data); change.received_at = new Date().toISOString(); state.events.unshift(change); state.events = state.events.slice(0, 100); renderEvents(); } catch (_) {}
+        scheduleRefresh();
+      }
     }
-    scheduleRefresh();
-  });
-  events.onerror = () => {
-    elements.connectionDot.className = "connection-dot offline";
-    elements.connectionText.textContent = "Reconnecting";
-  };
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    elements.connectionDot.className = "connection-dot offline"; elements.connectionText.textContent = "Reconnecting";
+    window.setTimeout(connect, 2000);
+  }
+}
+
+async function initialize() {
+  while (!state.token) {
+    const value = window.prompt("reqdb password:"); if (value === null) { elements.error.hidden = false; elements.error.textContent = "A password is required."; return; }
+    state.token = value.trim();
+  }
+  try {
+    await fetchPage("/v1/auth/check"); localStorage.setItem("reqdb.token", state.token);
+    const projects = (await fetchPage("/v1/projects")).data || []; if (!projects.length) throw new Error("No projects exist.");
+    if (!projects.some(project => project.id === state.project)) state.project = projects[0].id;
+    elements.project.replaceChildren(...projects.map(project => { const option = element("option", "", project.name); option.value = project.id; option.selected = project.id === state.project; return option; }));
+    localStorage.setItem("reqdb.project", state.project); await refresh(); connect();
+  } catch (error) { localStorage.removeItem("reqdb.token"); state.token = ""; elements.error.hidden = false; elements.error.textContent = error.message; initialize(); }
 }
 
 function dragSplitter(splitter, move) {
@@ -766,4 +795,8 @@ elements.collapseAll.addEventListener("click", () => {
   state.collapsed = new Set(state.requirements.map(item => `requirement:${item.id}`));
   render();
 });
-refresh(); connect();
+elements.project.addEventListener("change", () => {
+  state.project = elements.project.value; localStorage.setItem("reqdb.project", state.project); state.selected = null; state.initialized = false; state.events = []; refresh(); connect();
+});
+elements.logout.addEventListener("click", () => { localStorage.removeItem("reqdb.token"); state.token = ""; if (state.eventAbort) state.eventAbort.abort(); initialize(); });
+initialize();

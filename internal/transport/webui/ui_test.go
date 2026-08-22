@@ -29,6 +29,11 @@ func TestEmbeddedUI(t *testing.T) {
 	if strings.Contains(string(body), "software") || strings.Contains(string(body), "SWR-") {
 		t.Fatal("UI contains the removed requirement level")
 	}
+	for _, expected := range []string{`class="project-control"`, `class="topbar-action"`, `href="#i-logout"`} {
+		if !strings.Contains(string(body), expected) {
+			t.Errorf("index does not contain %q", expected)
+		}
+	}
 
 	response, err = http.Get(server.URL + "/assets/app.js")
 	if err != nil {
@@ -37,7 +42,7 @@ func TestEmbeddedUI(t *testing.T) {
 	body, _ = io.ReadAll(response.Body)
 	_ = response.Body.Close()
 	script := string(body)
-	if response.StatusCode != http.StatusOK || !strings.Contains(script, `new EventSource("/v1/events")`) {
+	if response.StatusCode != http.StatusOK || !strings.Contains(script, `authenticatedFetch("/v1/events"`) {
 		t.Fatalf("script response: status=%d body=%q", response.StatusCode, body)
 	}
 	if strings.Contains(script, "software") || strings.Contains(script, "SWR-") {

@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,8 +19,9 @@ import (
 )
 
 type API struct {
-	Service application.Service
-	Events  ports.EventSource
+	Service  application.Service
+	Events   ports.EventSource
+	Password string
 }
 type envelope struct {
 	Data  any       `json:"data,omitempty"`
@@ -35,7 +38,27 @@ type meta struct {
 	NextCursor    string `json:"next_cursor,omitempty"`
 }
 
-func (api API) Handler() http.Handler { return api.middleware(http.HandlerFunc(api.route)) }
+func (api API) Handler() http.Handler {
+	return api.middleware(api.authenticate(http.HandlerFunc(api.route)))
+}
+func (api API) authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if api.Password == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		value := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		provided, expected := sha256.Sum256([]byte(value)), sha256.Sum256([]byte(api.Password))
+		if value == "" || subtle.ConstantTimeCompare(provided[:], expected[:]) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("WWW-Authenticate", `Bearer realm="reqdb"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(envelope{Error: &apiError{Code: "UNAUTHORIZED", Message: "a valid bearer token is required", CorrelationID: application.CorrelationID(r.Context())}, Meta: meta{CorrelationID: application.CorrelationID(r.Context())}})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 func (api API) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		correlation := r.Header.Get("X-Correlation-ID")
@@ -100,6 +123,24 @@ func (api API) route(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/"), "/")
 	parts := strings.Split(path, "/")
+	if parts[0] == "auth" && len(parts) == 2 && parts[1] == "check" && r.Method == http.MethodGet {
+		write(w, r, http.StatusOK, map[string]bool{"authenticated": true}, "")
+		return
+	}
+	if parts[0] == "projects" {
+		api.projects(w, r, parts[1:])
+		return
+	}
+	// Retain unscoped routes only for unauthenticated in-process compatibility.
+	// Production servers require REQDB_PASSWORD and expose project routes.
+	if api.Password != "" {
+		fail(w, r, domain.ErrNotFound)
+		return
+	}
+	api.resource(w, r, parts)
+}
+
+func (api API) resource(w http.ResponseWriter, r *http.Request, parts []string) {
 	switch parts[0] {
 	case "requirements":
 		api.requirements(w, r, parts[1:])
@@ -122,6 +163,51 @@ func (api API) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, r, domain.ErrNotFound)
 	}
+}
+
+func (api API) projects(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) == 0 {
+		switch r.Method {
+		case http.MethodGet:
+			items, err := api.Service.ListProjects(r.Context(), actor(r))
+			if err != nil {
+				fail(w, r, err)
+				return
+			}
+			write(w, r, http.StatusOK, items, "")
+		case http.MethodPost:
+			var input domain.ProjectInput
+			if err := decode(r, &input); err != nil {
+				fail(w, r, err)
+				return
+			}
+			item, err := api.Service.CreateProject(r.Context(), input, actor(r))
+			if err != nil {
+				fail(w, r, err)
+				return
+			}
+			write(w, r, http.StatusCreated, item, "")
+		default:
+			fail(w, r, domain.ErrNotFound)
+		}
+		return
+	}
+	projectID := parts[0]
+	if _, err := api.Service.GetProject(r.Context(), projectID, actor(r)); err != nil {
+		fail(w, r, err)
+		return
+	}
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			fail(w, r, domain.ErrNotFound)
+			return
+		}
+		item, _ := api.Service.GetProject(r.Context(), projectID, actor(r))
+		write(w, r, http.StatusOK, item, "")
+		return
+	}
+	ctx := application.WithProjectID(r.Context(), projectID)
+	api.resource(w, r.WithContext(ctx), parts[1:])
 }
 
 func (api API) reviews(w http.ResponseWriter, r *http.Request, parts []string) {
@@ -171,6 +257,9 @@ func (api API) events(w http.ResponseWriter, r *http.Request) {
 		case event, open := <-stream:
 			if !open {
 				return
+			}
+			if event.ProjectID != ports.ProjectID(r.Context()) {
+				continue
 			}
 			data, err := json.Marshal(event)
 			if err != nil {

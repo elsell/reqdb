@@ -11,6 +11,7 @@ type contextKey string
 
 const correlationKey contextKey = "correlation"
 const causationKey contextKey = "causation"
+const projectKey contextKey = "project"
 
 func WithRequestIDs(ctx context.Context, correlation, causation string) context.Context {
 	ctx = context.WithValue(ctx, correlationKey, correlation)
@@ -27,7 +28,19 @@ func CausationID(ctx context.Context) string {
 	return value
 }
 
+func WithProjectID(ctx context.Context, project string) context.Context {
+	return context.WithValue(ctx, projectKey, project)
+}
+
+func ProjectID(ctx context.Context) string {
+	value, _ := ctx.Value(projectKey).(string)
+	return value
+}
+
 type Store interface {
+	CreateProject(context.Context, domain.ProjectInput) (domain.Project, error)
+	GetProject(context.Context, string) (domain.Project, error)
+	ListProjects(context.Context) ([]domain.Project, error)
 	CreateRequirement(context.Context, domain.RequirementInput, string) (domain.Requirement, error)
 	UpdateRequirement(context.Context, domain.RequirementInput, int, string) (domain.Requirement, error)
 	GetRequirement(context.Context, domain.RequirementRef) (domain.Requirement, error)
@@ -63,6 +76,7 @@ type Authorizer interface {
 
 type Event struct {
 	Sequence      uint64         `json:"sequence"`
+	ProjectID     string         `json:"project_id"`
 	Name          string         `json:"name"`
 	CorrelationID string         `json:"correlation_id"`
 	CausationID   string         `json:"causation_id"`

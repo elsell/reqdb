@@ -19,20 +19,27 @@ This repository contains the version 1 design. See [SPEC.md](SPEC.md), the
 
 ## Use
 
-Build and start the server:
+Build and start the server with a new database. This release intentionally does
+not migrate databases created by the version 1 schema.
 
 ```text
 make build
+export REQDB_PASSWORD='choose-a-password'
 build/reqdb serve --db reqdb.sqlite --listen 127.0.0.1:8080
 ```
 
 Open `http://127.0.0.1:8080` to see the live requirement and task trees. The UI
 is in the binary. It needs no separate build or server.
 
-Use the same binary as the client:
+Authenticate the CLI, create and select a project, then use the same commands as
+before. Credentials are stored per server in `~/.config/reqdb/token.json` with
+owner-only permissions. `REQDB_TOKEN` overrides the saved credential for CI.
 
 ```text
 export REQDB_SERVER=http://127.0.0.1:8080
+build/reqdb login --server "$REQDB_SERVER"
+build/reqdb project create reqdb --name "reqdb"
+build/reqdb project use reqdb
 build/reqdb requirement create --from-file examples/requirements/BRS/BR-SESSION-001.yaml
 build/reqdb requirement create --from-file examples/requirements/StRS/STR-SESSION-001.yaml
 build/reqdb requirement create --from-file examples/requirements/SyRS/SYR-SESSION-001.yaml
@@ -41,6 +48,7 @@ build/reqdb task create --from-file examples/tasks/T-0042.yaml
 build/reqdb task workable
 ```
 
-Use `--json` for machine-readable output. Use `--actor ID` to identify the
-actor in the audit log. The version 1 server allows all requests. Authorization
-is behind an application interface so that a later adapter can enforce it.
+Use `--project ID` or `REQDB_PROJECT` to override the saved project and `--json`
+for machine-readable output. Use `--actor ID` to label the actor in the audit
+log; with a shared password this label is caller-supplied rather than a verified
+identity. Use HTTPS whenever the server is accessed over a network.

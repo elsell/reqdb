@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/elsell/reqdb/internal/domain"
+	"github.com/elsell/reqdb/internal/ports"
 	"github.com/elsell/reqdb/internal/store/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -23,6 +24,55 @@ func openStore(t *testing.T) (*sqlite.Store, string) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
+}
+
+func TestProjectsIsolateDuplicateResourceIDs(t *testing.T) {
+	store, _ := openStore(t)
+	for _, id := range []string{"alpha", "beta"} {
+		if _, err := store.CreateProject(context.Background(), domain.ProjectInput{ID: id, Name: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alpha := ports.WithProjectID(context.Background(), "alpha")
+	beta := ports.WithProjectID(context.Background(), "beta")
+	input := requirement("BR-SHARED-001", "business", 1)
+	if _, err := store.CreateRequirement(alpha, input, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	input.Title = "Beta title"
+	if _, err := store.CreateRequirement(beta, input, "beta"); err != nil {
+		t.Fatal(err)
+	}
+	left, err := store.GetRequirement(alpha, domain.RequirementRef{ID: input.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := store.GetRequirement(beta, domain.RequirementRef{ID: input.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left.Revision.Title == right.Revision.Title {
+		t.Fatalf("projects were not isolated: %q", left.Revision.Title)
+	}
+}
+
+func TestOldSchemaIsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.sqlite")
+	database, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE requirement (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	database.Close()
+	store, err := sqlite.Open(path)
+	if store != nil {
+		store.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "incompatible database schema") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func requirement(id, level string, revision int, parents ...string) domain.RequirementInput {

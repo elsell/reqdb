@@ -11,6 +11,32 @@ import (
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
 
+type Project struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ProjectInput struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+var projectIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+func (input ProjectInput) Validate() error {
+	if !projectIDPattern.MatchString(input.ID) {
+		return errors.New("project ID must be a lowercase slug")
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("project name is required")
+	}
+	return nil
+}
+
 var fullCommitPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 func ValidateCommit(value string) error {

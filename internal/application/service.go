@@ -24,6 +24,30 @@ func CorrelationID(ctx context.Context) string {
 func CausationID(ctx context.Context) string {
 	return ports.CausationID(ctx)
 }
+func WithProjectID(ctx context.Context, project string) context.Context {
+	return ports.WithProjectID(ctx, project)
+}
+
+func (service Service) CreateProject(ctx context.Context, input domain.ProjectInput, actor string) (domain.Project, error) {
+	if err := service.authorize(ctx, actor, "project.create", input.ID); err != nil {
+		return domain.Project{}, err
+	}
+	return service.Store.CreateProject(ctx, input)
+}
+
+func (service Service) GetProject(ctx context.Context, id, actor string) (domain.Project, error) {
+	if err := service.authorize(ctx, actor, "project.read", id); err != nil {
+		return domain.Project{}, err
+	}
+	return service.Store.GetProject(ctx, id)
+}
+
+func (service Service) ListProjects(ctx context.Context, actor string) ([]domain.Project, error) {
+	if err := service.authorize(ctx, actor, "project.read", ""); err != nil {
+		return nil, err
+	}
+	return service.Store.ListProjects(ctx)
+}
 func NewID() string {
 	value := make([]byte, 16)
 	if _, err := rand.Read(value); err != nil {
@@ -61,7 +85,7 @@ func (service Service) authorize(ctx context.Context, actor, permission, resourc
 }
 func (service Service) event(ctx context.Context, name string, fields map[string]any) {
 	if service.Events != nil {
-		service.Events.Record(ctx, ports.Event{Name: name, CorrelationID: CorrelationID(ctx), CausationID: CausationID(ctx), Fields: fields})
+		service.Events.Record(ctx, ports.Event{ProjectID: ports.ProjectID(ctx), Name: name, CorrelationID: CorrelationID(ctx), CausationID: CausationID(ctx), Fields: fields})
 	}
 }
 

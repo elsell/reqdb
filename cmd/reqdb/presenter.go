@@ -25,6 +25,10 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 	parts := strings.Split(path, "/")
 
 	switch {
+	case path == "v1/projects" && method == http.MethodGet:
+		return printProjectList(data)
+	case parts[0] == "v1" && len(parts) >= 2 && parts[1] == "projects":
+		return printProject(data)
 	case path == "v1/requirements/check":
 		fmt.Println("Requirement input is valid.")
 		return nil
@@ -61,6 +65,32 @@ func printHuman(method, rawPath string, data json.RawMessage) error {
 	default:
 		return fmt.Errorf("no human output format for %s %s", method, parsed.Path)
 	}
+}
+
+func printProject(data json.RawMessage) error {
+	var item domain.Project
+	if err := json.Unmarshal(data, &item); err != nil {
+		return err
+	}
+	fmt.Printf("Project %s\n\nName:         %s\nDescription:  %s\nCreated:      %s\n", item.ID, item.Name, valueOrDash(item.Description), displayTime(item.CreatedAt))
+	return nil
+}
+
+func printProjectList(data json.RawMessage) error {
+	var items []domain.Project
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		fmt.Println("No projects found.")
+		return nil
+	}
+	table := newTable()
+	fmt.Fprintln(table, "ID\tNAME\tDESCRIPTION")
+	for _, item := range items {
+		fmt.Fprintf(table, "%s\t%s\t%s\n", item.ID, item.Name, item.Description)
+	}
+	return table.Flush()
 }
 
 func printReview(data json.RawMessage) error {

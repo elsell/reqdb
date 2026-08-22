@@ -6,14 +6,15 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/elsell/reqdb/internal/application"
 )
 
 type Client struct {
-	BaseURL, ActorID string
-	HTTP             *http.Client
+	BaseURL, ActorID, Token, Project string
+	HTTP                             *http.Client
 }
 type Envelope struct {
 	Data  json.RawMessage `json:"data"`
@@ -45,6 +46,9 @@ func (client Client) Do(ctx context.Context, method, path string, body any) (Env
 		}
 		reader = bytes.NewReader(value)
 	}
+	if client.Project != "" && strings.HasPrefix(path, "/v1/") && !strings.HasPrefix(path, "/v1/projects") && !strings.HasPrefix(path, "/v1/auth/") {
+		path = "/v1/projects/" + url.PathEscape(client.Project) + strings.TrimPrefix(path, "/v1")
+	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(client.BaseURL, "/")+path, reader)
 	if err != nil {
 		return Envelope{}, err
@@ -52,6 +56,9 @@ func (client Client) Do(ctx context.Context, method, path string, body any) (Env
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Actor-ID", client.ActorID)
 	req.Header.Set("X-Correlation-ID", application.NewID())
+	if client.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+client.Token)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

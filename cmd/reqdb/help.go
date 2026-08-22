@@ -19,6 +19,8 @@ Graph Commands:
   render        Render requirements as Markdown
 
 Other Commands:
+  login         Save a server credential
+  project       List, create, inspect, or select projects
   audit         List audit events
   serve         Start the API server
   help          Show help for a command
@@ -26,6 +28,7 @@ Other Commands:
 Global Options:
   --server URL  API server URL (default "http://127.0.0.1:8080")
   --actor ID    Actor ID for the audit log (default "anonymous")
+  --project ID  Project scope (or REQDB_PROJECT)
   --json        Print the API response as JSON
   -h, --help    Show help
 
@@ -94,6 +97,24 @@ Actions:
 Use "reqdb lease ACTION --help" for action options.
 `
 
+const loginHelp = `Save the shared bearer credential for a server.
+
+Usage:
+  reqdb login --server URL
+
+The password is prompted without echo and saved per server in
+~/.config/reqdb/token.json.
+`
+
+const projectHelp = `Manage project scopes.
+
+Usage:
+  reqdb project list [options]
+  reqdb project get ID [options]
+  reqdb project create ID [--name NAME] [--description TEXT] [options]
+  reqdb project use ID [options]
+`
+
 const serveHelp = `Start the reqdb API server.
 
 Usage:
@@ -105,6 +126,9 @@ Options:
   --audit-retention-days DAYS   Audit retention period (default 90)
   -h, --help                    Show help
 
+Environment:
+  REQDB_PASSWORD                Required shared bearer password
+
 Example:
   reqdb serve --db reqdb.sqlite --listen 127.0.0.1:8080
 `
@@ -113,6 +137,7 @@ const clientOptionsHelp = `
 Global Options:
   --server URL   API server URL (default "http://127.0.0.1:8080")
   --actor ID     Actor ID for the audit log (default "anonymous")
+  --project ID   Project scope (or REQDB_PROJECT)
   --json         Print the API response as JSON
   -h, --help     Show help
 `
@@ -341,6 +366,10 @@ func helpFor(args []string) string {
 		return taskHelp
 	case "lease":
 		return leaseHelp
+	case "login":
+		return loginHelp
+	case "project":
+		return projectHelp
 	case "serve":
 		return serveHelp
 	default:
@@ -355,7 +384,7 @@ func isHelpRequest(args []string) bool {
 	if len(args) == 0 || args[0] == "help" {
 		return true
 	}
-	if len(args) == 1 && (args[0] == "requirement" || args[0] == "review" || args[0] == "task" || args[0] == "lease") {
+	if len(args) == 1 && (args[0] == "requirement" || args[0] == "review" || args[0] == "task" || args[0] == "lease" || args[0] == "login" || args[0] == "project") {
 		return true
 	}
 	return has(args, "-h") || has(args, "--help")
