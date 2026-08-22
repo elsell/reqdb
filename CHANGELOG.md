@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/elsell/reqdb/compare/v1.0.0...v1.1.0) (2026-08-22)
+
+
+### Features
+
+* sign and attest release images ([63d1c85](https://github.com/elsell/reqdb/commit/63d1c8566790d9cde4cdb3bfedc4c1c04adfb1e5))
+* support PostgreSQL storage ([4db7904](https://github.com/elsell/reqdb/commit/4db7904a203a377d827bbc163c79ee8182062f41))
+
 ## 1.0.0 (2026-08-22)
 
 
