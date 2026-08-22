@@ -65,7 +65,6 @@ function statusIcon(value) {
   if (value === "pending_review" || value === "awaiting_review") return "review";
   if (value === "ready_for_work" || value === "ready_to_lease") return "ready";
   if (value === "work_in_progress") return "progress";
-  if (value === "awaiting_review") return "review";
   if (value === "no_work_required") return "check";
   if (value === "retired" || value === "closed" || value === "inactive") return "retired";
   return "pending";
@@ -284,7 +283,7 @@ function groupNode(key, title, count, roots, children, values, describe, type, r
     : state.tasks.filter(item => item.state === "complete").length;
   wrapper.append(nodeRow({
     title: `${title} (${count})`, group: true, depth: 0, hasChildren: roots.length > 0, collapsed,
-    stateValue: complete === count && count > 0 ? (type === "requirement" ? "satisfied" : "complete") : "in_progress",
+    stateValue: complete === count && count > 0 ? (type === "requirement" ? "satisfied" : "complete") : (type === "requirement" ? "pending_review" : "open"),
     stateLabel: `${complete}/${count} ${type === "requirement" ? "satisfied" : "complete"}`,
     toggle: () => { collapsed ? state.collapsedGroups.delete(key) : state.collapsedGroups.add(key); render(); },
   }));
@@ -531,7 +530,7 @@ function renderDetails() {
   const statuses = element("div", "detail-statuses");
   statuses.append(statusChip(item.state));
   if (item.workability) statuses.append(statusChip(item.workability.work_status));
-  if (lease) statuses.append(statusChip("in_progress", `leased · ${lease.agent_id}`));
+  if (lease) statuses.append(statusChip("work_in_progress", `leased · ${lease.agent_id}`));
   elements.details.append(statuses);
   elements.details.append(detailActions(description.actions));
   const properties = element("div", "properties");

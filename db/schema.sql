@@ -4,7 +4,7 @@ CREATE TABLE requirement (
     current_revision INTEGER NOT NULL CHECK (current_revision > 0),
     lifecycle_state TEXT NOT NULL DEFAULT 'active'
         CHECK (lifecycle_state IN ('active', 'retired')),
-    reconciliation_state TEXT NOT NULL
+    reconciliation_state TEXT
         CHECK (reconciliation_state IN (
             'pending_review', 'satisfied', 'not_satisfied'
         )),
@@ -19,7 +19,7 @@ CREATE TABLE requirement_revision (
     requirement_id TEXT NOT NULL REFERENCES requirement(id),
     revision INTEGER NOT NULL CHECK (revision > 0),
     level TEXT NOT NULL
-        CHECK (level IN ('business', 'stakeholder', 'system', 'software')),
+        CHECK (level IN ('business', 'stakeholder', 'system')),
     title TEXT NOT NULL CHECK (length(title) > 0),
     statement TEXT NOT NULL CHECK (length(statement) > 0),
     created_at TEXT NOT NULL,

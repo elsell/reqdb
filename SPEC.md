@@ -33,15 +33,22 @@ notices shall not contain authoritative graph data.
 | Business | BRS | `BR-` | A result that the organization wants. | None |
 | Stakeholder | StRS | `STR-` | An outcome that a stakeholder needs. | Business |
 | System | SyRS | `SYR-` | Observable system behavior or a measurable system property. | Stakeholder |
-| Software | SRS | `SWR-` | Software behavior that satisfies a system requirement. | System |
 
 Each non-business requirement shall refine one or more requirements at the
 immediate parent level. Each link shall name a parent revision. The refinement
 graph shall be acyclic.
 
-An active requirement with no active current refinement children shall be a
-leaf. Only a software requirement can have implementation work or a review. A
-software requirement shall use its stored reconciliation state.
+An active stakeholder requirement with no active system child shall be an
+actionable leaf. An active system requirement shall also be an actionable
+leaf. Only actionable leaves can have tasks, reviews, or direct stored
+reconciliation state. A business requirement shall not be actionable.
+
+A stakeholder requirement can omit system children. A system requirement
+cannot have requirement children. When the first system child is added, the
+server shall reject the change if the current stakeholder revision has tasks
+or reviews. The operator can create a new stakeholder revision before
+decomposition. When the last active system child is retired, the stakeholder
+requirement shall become actionable and `pending_review`.
 
 An active non-leaf requirement shall derive its reconciliation state from its
 active current refinement leaves. It shall be `not_satisfied` when any leaf is
@@ -91,17 +98,16 @@ Reqdb shall report workability with a `workable` Boolean, one derived
 `work_status`, and `reasons`. The first matching requirement rule shall win:
 
 1. `inactive`: The requirement is retired.
-2. `managed_through_children`: The requirement level is not software.
+2. `managed_through_children`: The requirement is business level, or it is a
+   stakeholder requirement with active system children.
 3. `waiting`: A requirement dependency is not `satisfied`, or linked open
    tasks exist while none has an active lease and none is ready to lease.
 4. `no_work_required`: The requirement is `satisfied`.
 5. `ready_for_work`: One or more linked open tasks have no active lease.
 6. `work_in_progress`: A linked task has an active lease.
-7. `awaiting_review`: No linked task is open or leased, and the requirement is
-   `pending_review`, or it is `not_satisfied` with one or more tasks completed
-   after the latest review.
-8. `needs_task`: The requirement is `not_satisfied`, no linked task is open,
-   and no linked task completed after the latest review.
+7. `awaiting_review`: The requirement is `pending_review`, no linked task is
+   open, and no linked task has an active lease.
+8. `needs_task`: The requirement is `not_satisfied` and no linked task is open.
 
 All task checks shall use tasks linked to the current requirement revision. A
 requirement shall be workable only when its work status is `ready_for_work`.
@@ -109,8 +115,9 @@ requirement shall be workable only when its work status is `ready_for_work`.
 ## Reconciliation
 
 Reconciliation describes the relation between a requirement hierarchy and the
-code. Reqdb shall expose one reconciliation state for each requirement. A leaf
-shall use direct reconciliation. A non-leaf shall use refinement roll-up.
+code. Reqdb shall expose one reconciliation state for each requirement. An
+actionable leaf shall use direct reconciliation. Other requirements shall use
+refinement roll-up.
 
 | State | Meaning |
 |---|---|
@@ -118,8 +125,8 @@ shall use direct reconciliation. A non-leaf shall use refinement roll-up.
 | `satisfied` | A leaf has an accepted review, or every active child of a non-leaf is recursively satisfied. |
 | `not_satisfied` | A leaf has a rejected review, or a non-leaf has a not-satisfied active leaf. |
 
-A review shall be an immutable record for one current, active software requirement
-revision and one full Git commit. It shall contain a server-generated ID, the
+A review shall be an immutable record for one current actionable leaf revision
+and one full Git commit. It shall contain a server-generated ID, the
 reviewer, the review time, and the verdict `accept` or `reject`.
 
 Each review response shall include the exact requirement ID and revision. The
@@ -135,12 +142,14 @@ Task completion shall not satisfy a requirement by itself. A review can refer
 to the completed task that produced the commit. That task shall link to the
 exact requirement revision, and its completion commit shall match the review.
 
-A task or lease change shall not change reconciliation state. An accepted
+A completed corrective task shall change `not_satisfied` to `pending_review`
+for each linked current actionable leaf. Task leasing, lease release,
+heartbeat, and lease expiry shall not change reconciliation. An accepted
 review shall set the current requirement revision to `satisfied` and resolve
 its open reconciliation causes. A rejected review shall set it to
-`not_satisfied`.
+`not_satisfied`. Only reviews can set `satisfied` or `not_satisfied`.
 
-A review without a task shall be valid for a current software requirement. The
+A review without a task shall be valid for a current actionable leaf. The
 server shall make review creation idempotent by requirement
 ID, revision, and commit. An identical submission shall return the stored
 review. Different content for the same key shall cause a conflict.
@@ -164,8 +173,8 @@ A task shall have a title, description, priority, state, requirement links,
 and task dependencies. A requirement link shall have the purpose `implement`
 or `reconcile`.
 
-An implementation or reconciliation task shall link only to software
-requirement revisions.
+An implementation or reconciliation task shall link only to actionable leaf
+revisions.
 
 A task shall be `open`, `complete`, or `closed`. Closing shall stop an open,
 unleased task without completing it. A closed task shall not satisfy task

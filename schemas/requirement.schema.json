@@ -16,10 +16,10 @@
     "schema": {"const": "requirement/v1"},
     "id": {
       "type": "string",
-      "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*$"
+      "pattern": "^(BR|STR|SYR)-[A-Z0-9]+(?:-[A-Z0-9]+)*$"
     },
     "level": {
-      "enum": ["business", "stakeholder", "system", "software"]
+      "enum": ["business", "stakeholder", "system"]
     },
     "revision": {"type": "integer", "minimum": 1},
     "title": {"type": "string", "minLength": 1},
@@ -34,7 +34,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+            "pattern": "^(BR|STR|SYR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
           }
         },
         "depends_on": {
@@ -42,7 +42,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(BR|STR|SYR|SWR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
+            "pattern": "^(BR|STR|SYR)-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
           }
         }
       }
@@ -89,24 +89,6 @@
                 "minItems": 1,
                 "items": {
                   "pattern": "^STR-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "if": {"properties": {"level": {"const": "software"}}},
-      "then": {
-        "properties": {
-          "id": {"pattern": "^SWR-[A-Z0-9]+(?:-[A-Z0-9]+)*$"},
-          "links": {
-            "properties": {
-              "refines": {
-                "minItems": 1,
-                "items": {
-                  "pattern": "^SYR-[A-Z0-9]+(?:-[A-Z0-9]+)*@[1-9][0-9]*$"
                 }
               }
             }

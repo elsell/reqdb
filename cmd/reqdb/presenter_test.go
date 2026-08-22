@@ -59,17 +59,17 @@ func TestRequirementDetailUsesFields(t *testing.T) {
 }
 
 func TestReviewOutputsUseFieldsAndTables(t *testing.T) {
-	review := domain.Review{ID: "RV-1", Requirement: domain.RequirementRef{ID: "SWR-TEST-001", Revision: 2}, Verdict: "reject", Commit: strings.Repeat("a", 40), ReviewerID: "reviewer", ReviewedAt: time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC), Findings: []domain.ReviewFinding{{Message: "The result is incomplete.", Path: "result.go", Line: 12}}}
+	review := domain.Review{ID: "RV-1", Requirement: domain.RequirementRef{ID: "SYR-TEST-001", Revision: 2}, Verdict: "reject", Commit: strings.Repeat("a", 40), ReviewerID: "reviewer", ReviewedAt: time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC), Findings: []domain.ReviewFinding{{Message: "The result is incomplete.", Path: "result.go", Line: 12}}}
 	data, _ := json.Marshal(review)
 	detail := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/reviews/RV-1", data) })
-	for _, text := range []string{"Review RV-1", "SWR-TEST-001@2", "reject", "The result is incomplete.", "result.go:12"} {
+	for _, text := range []string{"Review RV-1", "SYR-TEST-001@2", "reject", "The result is incomplete.", "result.go:12"} {
 		if !strings.Contains(detail, text) {
 			t.Fatalf("review detail does not contain %q: %s", text, detail)
 		}
 	}
 	listData, _ := json.Marshal([]domain.Review{review})
-	list := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/requirements/SWR-TEST-001/reviews", listData) })
-	for _, text := range []string{"ID", "REQUIREMENT", "SWR-TEST-001@2", "RV-1"} {
+	list := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/requirements/SYR-TEST-001/reviews", listData) })
+	for _, text := range []string{"ID", "REQUIREMENT", "SYR-TEST-001@2", "RV-1"} {
 		if !strings.Contains(list, text) {
 			t.Fatalf("review list does not contain %q: %s", text, list)
 		}
@@ -105,10 +105,10 @@ func TestTraceColorsRequirementMetadata(t *testing.T) {
 }
 
 func TestTraceShowsLinkedTask(t *testing.T) {
-	root := domain.Requirement{ID: "SWR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Calculate"}}
-	task := domain.Task{ID: "T-1", Title: "Implement calculation", State: "open", Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-TEST-001@1", Purpose: "implement"}}}
+	root := domain.Requirement{ID: "SYR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.NotSatisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "system", Title: "Calculate"}}
+	task := domain.Task{ID: "T-1", Title: "Implement calculation", State: "open", Requirements: []domain.TaskRequirementInput{{Requirement: "SYR-TEST-001@1", Purpose: "implement"}}}
 	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{root}, Tasks: []domain.Task{task}})
-	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/SWR-TEST-001", data) })
+	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace/SYR-TEST-001", data) })
 	if !strings.Contains(output, "└── T-1") {
 		t.Fatalf("trace does not contain its linked task: %s", output)
 	}
@@ -124,11 +124,11 @@ func TestLeaseListUsesTable(t *testing.T) {
 }
 
 func TestTraceShowsDependencyLinksSeparately(t *testing.T) {
-	base := domain.Requirement{ID: "SWR-BASE-001", CurrentRevision: 1, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Base"}}
-	target := domain.Requirement{ID: "SWR-TARGET-001", CurrentRevision: 1, Revision: domain.RequirementRevision{Revision: 1, Level: "software", Title: "Target", Dependencies: []domain.RequirementRef{{ID: base.ID, Revision: 1}}}}
+	base := domain.Requirement{ID: "SYR-BASE-001", CurrentRevision: 1, Revision: domain.RequirementRevision{Revision: 1, Level: "system", Title: "Base"}}
+	target := domain.Requirement{ID: "SYR-TARGET-001", CurrentRevision: 1, Revision: domain.RequirementRevision{Revision: 1, Level: "system", Title: "Target", Dependencies: []domain.RequirementRef{{ID: base.ID, Revision: 1}}}}
 	data, _ := json.Marshal(domain.RequirementGraph{Requirements: []domain.Requirement{base, target}})
 	output := captureOutput(t, func() error { return printHuman(http.MethodGet, "/v1/trace", data) })
-	for _, value := range []string{"Dependency links:", "REQUIREMENT", "DEPENDS ON", "SWR-TARGET-001@1", "SWR-BASE-001@1"} {
+	for _, value := range []string{"Dependency links:", "REQUIREMENT", "DEPENDS ON", "SYR-TARGET-001@1", "SYR-BASE-001@1"} {
 		if !strings.Contains(output, value) {
 			t.Fatalf("trace does not contain %q: %s", value, output)
 		}

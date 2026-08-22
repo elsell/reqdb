@@ -3,7 +3,6 @@ module github.com/elsell/reqdb
 go 1.26
 
 require (
-	github.com/go-gormigrate/gormigrate/v2 v2.1.5
 	github.com/mattn/go-sqlite3 v1.14.22
 	go.opentelemetry.io/otel v1.36.0
 	gopkg.in/yaml.v3 v3.0.1

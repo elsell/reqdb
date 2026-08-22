@@ -94,11 +94,10 @@ var idPatterns = map[string]*regexp.Regexp{
 	"business":    regexp.MustCompile(`^BR-[A-Z0-9]+(?:-[A-Z0-9]+)*$`),
 	"stakeholder": regexp.MustCompile(`^STR-[A-Z0-9]+(?:-[A-Z0-9]+)*$`),
 	"system":      regexp.MustCompile(`^SYR-[A-Z0-9]+(?:-[A-Z0-9]+)*$`),
-	"software":    regexp.MustCompile(`^SWR-[A-Z0-9]+(?:-[A-Z0-9]+)*$`),
 }
 
 var parentPrefixes = map[string]string{
-	"stakeholder": "BR-", "system": "STR-", "software": "SYR-",
+	"stakeholder": "BR-", "system": "STR-",
 }
 
 func (input RequirementInput) Validate() error {

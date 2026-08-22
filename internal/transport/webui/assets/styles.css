@@ -81,7 +81,6 @@ button:disabled { opacity: .55; }
 .item-icon.business { color: #6929c4; }
 .item-icon.stakeholder { color: #005d5d; }
 .item-icon.system { color: #0f62fe; }
-.item-icon.software { color: #9f1853; }
 .item-icon.task { color: #525252; }
 .node-id { flex: none; margin-right: 5px; color: #20354b; font-family: Consolas, "Liberation Mono", monospace; font-weight: 700; }
 .node-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

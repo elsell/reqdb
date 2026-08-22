@@ -80,7 +80,7 @@ func TestReviewReadEndpoints(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
-	input := domain.RequirementInput{Schema: "requirement/v1", ID: "SWR-REVIEW-API-001", Level: "software", Revision: 1, Title: "Read reviews", Statement: "The software shall return one review."}
+	input := domain.RequirementInput{Schema: "requirement/v1", ID: "STR-REVIEW-API-001", Level: "stakeholder", Revision: 1, Title: "Read reviews", Statement: "The service shall return one review."}
 	if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 		t.Fatal(err)
 	}

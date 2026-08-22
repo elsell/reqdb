@@ -26,6 +26,9 @@ func TestEmbeddedUI(t *testing.T) {
 	if response.Header.Get("Content-Security-Policy") == "" {
 		t.Fatal("content security policy is missing")
 	}
+	if strings.Contains(string(body), "software") || strings.Contains(string(body), "SWR-") {
+		t.Fatal("UI contains the removed requirement level")
+	}
 
 	response, err = http.Get(server.URL + "/assets/app.js")
 	if err != nil {
@@ -36,6 +39,9 @@ func TestEmbeddedUI(t *testing.T) {
 	script := string(body)
 	if response.StatusCode != http.StatusOK || !strings.Contains(script, `new EventSource("/v1/events")`) {
 		t.Fatalf("script response: status=%d body=%q", response.StatusCode, body)
+	}
+	if strings.Contains(script, "software") || strings.Contains(script, "SWR-") {
+		t.Fatal("UI script contains the removed requirement level")
 	}
 	for _, expected := range []string{"tasksByRequirement", "renderEvents", "state.events.unshift", "selectTaskInTree", "state.collapsed = new Set", "statusMatches", "aria-pressed"} {
 		if !strings.Contains(script, expected) {

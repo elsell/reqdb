@@ -135,7 +135,7 @@ Usage:
 
 Options:
   --cursor ID       Continue after a requirement ID
-  --level LEVEL     Filter by business, stakeholder, system, or software
+  --level LEVEL     Filter by business, stakeholder, or system
   --state STATE     Filter by reconciliation state
   --json            Print the API response as JSON
 `,
@@ -157,7 +157,7 @@ Usage:
 
 Input Options:
   -f, --from-file FILE       Read YAML from FILE; use - for standard input
-  --level LEVEL              business, stakeholder, system, or software
+  --level LEVEL              business, stakeholder, or system
   --title TITLE              Requirement title
   --statement STATEMENT      One requirement obligation
   --refines ID@REVISION      Parent revision; repeat for more parents
@@ -171,7 +171,7 @@ Usage:
 
 Input Options:
   -f, --from-file FILE       Read YAML from FILE; use - for standard input
-  --level LEVEL              business, stakeholder, system, or software
+  --level LEVEL              business, stakeholder, or system
   --title TITLE              Requirement title
   --statement STATEMENT      One requirement obligation
   --refines ID@REVISION      Parent revision; repeat for more parents
@@ -185,7 +185,7 @@ Usage:
 
 Input Options:
   -f, --from-file FILE       Read YAML from FILE; use - for standard input
-  --level LEVEL              business, stakeholder, system, or software
+  --level LEVEL              business, stakeholder, or system
   --title TITLE              Requirement title
   --statement STATEMENT      One requirement obligation
   --refines ID@REVISION      Parent revision; repeat for more parents

@@ -10,7 +10,7 @@ coordinates the tasks that implement or reconcile those requirements.
 - Tasks have dependencies, leases, requirement links, and pull request links.
 - Rendered documents are derived views for humans and LLMs.
 
-The requirement hierarchy uses BRS, StRS, SyRS, and SRS. It aligns with
+The requirement hierarchy uses BRS, StRS, and optional SyRS levels. It aligns with
 [ISO/IEC/IEEE 29148:2018](https://www.iso.org/standard/72089.html), but it does
 not claim conformance.
 
@@ -36,7 +36,6 @@ export REQDB_SERVER=http://127.0.0.1:8080
 build/reqdb requirement create --from-file examples/requirements/BRS/BR-SESSION-001.yaml
 build/reqdb requirement create --from-file examples/requirements/StRS/STR-SESSION-001.yaml
 build/reqdb requirement create --from-file examples/requirements/SyRS/SYR-SESSION-001.yaml
-build/reqdb requirement create --from-file examples/requirements/SRS/SWR-SESSION-001.yaml
 build/reqdb requirement list
 build/reqdb task create --from-file examples/tasks/T-0042.yaml
 build/reqdb task workable

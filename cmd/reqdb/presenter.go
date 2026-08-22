@@ -360,13 +360,11 @@ var traceLevelColors = map[string]string{
 	"business":    "97;45",
 	"stakeholder": "97;44",
 	"system":      "30;46",
-	"software":    "30;42",
 }
 
 var traceStateColors = map[string]string{
 	"satisfied":      "30;42",
 	"not_satisfied":  "97;100",
-	"in_progress":    "97;44",
 	"pending_review": "30;43",
 	"retired":        "97;100",
 	"open":           "97;44",

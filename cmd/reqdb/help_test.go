@@ -11,6 +11,9 @@ func TestActionHelp(t *testing.T) {
 	if !strings.Contains(help, "--expected REVISION") {
 		t.Fatal("requirement update help does not show its required revision")
 	}
+	if strings.Contains(help, "software") || strings.Contains(help, "SWR-") {
+		t.Fatal("help contains the removed requirement level")
+	}
 }
 
 func TestNormalizeGlobalArgs(t *testing.T) {

@@ -5,6 +5,6 @@ title: Reject expired sessions
 description: Add expired-session rejection to the authentication service.
 priority: 50
 requirements:
-  - requirement: SWR-SESSION-001@1
+  - requirement: SYR-SESSION-001@1
     purpose: implement
 depends_on: []

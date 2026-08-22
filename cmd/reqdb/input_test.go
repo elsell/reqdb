@@ -9,24 +9,24 @@ import (
 
 func TestRequirementInputFromFlags(t *testing.T) {
 	input, err := requirementInput([]string{
-		"create", "SWR-TEST-001",
-		"--level", "software",
+		"create", "SYR-TEST-001",
+		"--level", "system",
 		"--title", "Test input",
-		"--statement", "The software shall accept test input.",
-		"--refines", "SYR-TEST-001@1",
-		"--depends-on=SWR-BASE-001@2",
-		"--depends-on", "SWR-CLOCK-001@1",
+		"--statement", "The system shall accept test input.",
+		"--refines", "STR-TEST-001@1",
+		"--depends-on=SYR-BASE-001@2",
+		"--depends-on", "SYR-CLOCK-001@1",
 	}, "create")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.Schema != "requirement/v1" || input.ID != "SWR-TEST-001" || input.Revision != 1 {
+	if input.Schema != "requirement/v1" || input.ID != "SYR-TEST-001" || input.Revision != 1 {
 		t.Fatalf("unexpected identity: %#v", input)
 	}
-	if !reflect.DeepEqual(input.Links.Refines, []string{"SYR-TEST-001@1"}) {
+	if !reflect.DeepEqual(input.Links.Refines, []string{"STR-TEST-001@1"}) {
 		t.Fatalf("unexpected refinement links: %v", input.Links.Refines)
 	}
-	wantDependencies := []string{"SWR-BASE-001@2", "SWR-CLOCK-001@1"}
+	wantDependencies := []string{"SYR-BASE-001@2", "SYR-CLOCK-001@1"}
 	if !reflect.DeepEqual(input.Links.DependsOn, wantDependencies) {
 		t.Fatalf("got dependencies %v, want %v", input.Links.DependsOn, wantDependencies)
 	}
@@ -34,8 +34,8 @@ func TestRequirementInputFromFlags(t *testing.T) {
 
 func TestRequirementUpdateInputSetsNextRevision(t *testing.T) {
 	input, err := requirementInput([]string{
-		"update", "SWR-TEST-001", "--expected", "4", "--level", "software",
-		"--title", "New title", "--statement", "The software shall use the new title.",
+		"update", "SYR-TEST-001", "--expected", "4", "--level", "system",
+		"--title", "New title", "--statement", "The system shall use the new title.",
 	}, "update")
 	if err != nil {
 		t.Fatal(err)
@@ -48,8 +48,8 @@ func TestRequirementUpdateInputSetsNextRevision(t *testing.T) {
 func TestTaskInputFromFlags(t *testing.T) {
 	input, err := taskInput([]string{
 		"create", "T-42", "--title", "Implement input", "--description", "Implement the input modes.",
-		"--priority", "60", "--requirement", "SWR-TEST-001@1:implement",
-		"--requirement=SWR-OTHER-001@2:reconcile", "--depends-on", "T-41",
+		"--priority", "60", "--requirement", "SYR-TEST-001@1:implement",
+		"--requirement=STR-OTHER-001@2:reconcile", "--depends-on", "T-41",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestInputModesCannotBeCombined(t *testing.T) {
 }
 
 func TestReviewInputFromFlags(t *testing.T) {
-	input, err := reviewInput([]string{"review", "SWR-TEST-001", "--commit", strings.Repeat("a", 40), "--verdict", "reject", "--task", "T-1", "--finding", "First finding", "--finding", "Second finding"})
+	input, err := reviewInput([]string{"review", "SYR-TEST-001", "--commit", strings.Repeat("a", 40), "--verdict", "reject", "--task", "T-1", "--finding", "First finding", "--finding", "Second finding"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestReviewInputFromStandardInput(t *testing.T) {
 	}
 	os.Stdin = file
 	defer func() { os.Stdin = original }()
-	input, err := reviewInput([]string{"review", "SWR-TEST-001", "--from-file", "-"})
+	input, err := reviewInput([]string{"review", "SYR-TEST-001", "--from-file", "-"})
 	if err != nil {
 		t.Fatal(err)
 	}
