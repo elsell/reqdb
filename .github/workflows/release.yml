@@ -39,6 +39,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository }}
     steps:
@@ -79,6 +80,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and publish image
+        id: image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -94,4 +96,101 @@ jobs:
             BUILD_VERSION=${{ needs.release-please.outputs.release-version }}
           cache-from: type=gha,scope=reqdb-release
           cache-to: type=gha,mode=max,scope=reqdb-release
-          provenance: false
+          provenance: mode=max
+          sbom: generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68
+      - name: Resolve AMD64 image digest
+        id: platform
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE_NAME}@${IMAGE_DIGEST}" --raw > image-index.json
+          amd64=$(jq -er '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest' image-index.json)
+          [[ "$amd64" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "amd64-digest=$amd64" >> "$GITHUB_OUTPUT"
+      - name: Extract BuildKit SPDX SBOM
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE_NAME}@${IMAGE_DIGEST}" \
+            --format '{{ json .SBOM.SPDX }}' > reqdb-amd64.spdx.json
+          jq -e '.spdxVersion and .SPDXID and .packages' reqdb-amd64.spdx.json >/dev/null
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+      - name: Sign image index with GitHub OIDC identity
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: cosign sign --yes "${IMAGE_NAME}@${IMAGE_DIGEST}"
+      - name: Generate SLSA provenance predicate
+        env:
+          BUILD_REVISION: ${{ steps.build.outputs.revision }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.release-tag }}
+          RELEASE_VERSION: ${{ needs.release-please.outputs.release-version }}
+        run: |
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg revision "$BUILD_REVISION" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg version "$RELEASE_VERSION" \
+            '{
+              buildDefinition: {
+                buildType: "https://github.com/Attestations/GitHubActionsWorkflow@v1",
+                externalParameters: {
+                  repository: $repository,
+                  sourceRef: ("refs/tags/" + $release_tag),
+                  buildVersion: $version
+                },
+                internalParameters: {},
+                resolvedDependencies: [{
+                  uri: ("git+https://github.com/" + $repository + "@refs/tags/" + $release_tag),
+                  digest: {gitCommit: $revision}
+                }]
+              },
+              runDetails: {
+                builder: {
+                  id: ("https://github.com/" + $repository + "/.github/workflows/release.yml@refs/heads/main")
+                },
+                metadata: {
+                  invocationId: ("https://github.com/" + $repository + "/actions/runs/" + $run_id)
+                }
+              }
+            }' > reqdb-provenance.json
+      - name: Attest image provenance
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --type slsaprovenance \
+            --predicate reqdb-provenance.json \
+            "${IMAGE_NAME}@${IMAGE_DIGEST}"
+      - name: Attest AMD64 SBOM
+        env:
+          AMD64_DIGEST: ${{ steps.platform.outputs.amd64-digest }}
+        run: |
+          cosign attest --yes \
+            --type spdxjson \
+            --predicate reqdb-amd64.spdx.json \
+            "${IMAGE_NAME}@${AMD64_DIGEST}"
+      - name: Verify image signature and attestations
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          AMD64_DIGEST: ${{ steps.platform.outputs.amd64-digest }}
+        run: |
+          identity='^https://github.com/elsell/reqdb/.github/workflows/release.yml@refs/heads/main$'
+          issuer='https://token.actions.githubusercontent.com'
+          cosign verify \
+            --certificate-identity-regexp="$identity" \
+            --certificate-oidc-issuer="$issuer" \
+            "${IMAGE_NAME}@${IMAGE_DIGEST}"
+          cosign verify-attestation \
+            --type slsaprovenance \
+            --certificate-identity-regexp="$identity" \
+            --certificate-oidc-issuer="$issuer" \
+            "${IMAGE_NAME}@${IMAGE_DIGEST}"
+          cosign verify-attestation \
+            --type spdxjson \
+            --certificate-identity-regexp="$identity" \
+            --certificate-oidc-issuer="$issuer" \
+            "${IMAGE_NAME}@${AMD64_DIGEST}"
