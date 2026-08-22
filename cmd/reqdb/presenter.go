@@ -126,13 +126,13 @@ func printRequirementList(data json.RawMessage) error {
 		return nil
 	}
 	table := newTable()
-	fmt.Fprintln(table, "ID\tREVISION\tLEVEL\tLIFECYCLE\tRECONCILIATION\tWORKABLE\tDISPOSITION\tTITLE")
+	fmt.Fprintln(table, "ID\tREVISION\tLEVEL\tLIFECYCLE\tRECONCILIATION\tWORKABLE\tWORK STATUS\tTITLE")
 	for _, item := range items {
-		workable, disposition := false, ""
+		workable, workStatus := false, ""
 		if item.Workability != nil {
-			workable, disposition = item.Workability.Workable, item.Workability.Disposition
+			workable, workStatus = item.Workability.Workable, item.Workability.WorkStatus
 		}
-		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\t%t\t%s\t%s\n", item.ID, item.CurrentRevision, item.Revision.Level, item.LifecycleState, item.ReconciliationState, workable, disposition, item.Revision.Title)
+		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\t%t\t%s\t%s\n", item.ID, item.CurrentRevision, item.Revision.Level, item.LifecycleState, item.ReconciliationState, workable, workStatus, item.Revision.Title)
 	}
 	return table.Flush()
 }
@@ -364,15 +364,14 @@ var traceLevelColors = map[string]string{
 }
 
 var traceStateColors = map[string]string{
-	"satisfied":            "30;42",
-	"not_satisfied":        "97;100",
-	"in_progress":          "97;44",
-	"ready_for_review":     "30;43",
-	"needs_reconciliation": "97;41",
-	"retired":              "97;100",
-	"open":                 "97;44",
-	"complete":             "30;42",
-	"closed":               "97;100",
+	"satisfied":      "30;42",
+	"not_satisfied":  "97;100",
+	"in_progress":    "97;44",
+	"pending_review": "30;43",
+	"retired":        "97;100",
+	"open":           "97;44",
+	"complete":       "30;42",
+	"closed":         "97;100",
 }
 
 func traceBadge(value, colors string, enabled bool) string {
@@ -422,13 +421,13 @@ func printTaskList(data json.RawMessage) error {
 		return nil
 	}
 	table := newTable()
-	fmt.Fprintln(table, "ID\tSTATE\tWORKABLE\tDISPOSITION\tPRIORITY\tREQUIREMENTS\tPRS\tTITLE")
+	fmt.Fprintln(table, "ID\tSTATE\tWORKABLE\tWORK STATUS\tPRIORITY\tREQUIREMENTS\tPRS\tTITLE")
 	for _, item := range items {
-		workable, disposition := false, ""
+		workable, workStatus := false, ""
 		if item.Workability != nil {
-			workable, disposition = item.Workability.Workable, item.Workability.Disposition
+			workable, workStatus = item.Workability.Workable, item.Workability.WorkStatus
 		}
-		fmt.Fprintf(table, "%s\t%s\t%t\t%s\t%d\t%d\t%d\t%s\n", item.ID, item.State, workable, disposition, item.Priority, len(item.Requirements), len(item.PullRequests), item.Title)
+		fmt.Fprintf(table, "%s\t%s\t%t\t%s\t%d\t%d\t%d\t%s\n", item.ID, item.State, workable, workStatus, item.Priority, len(item.Requirements), len(item.PullRequests), item.Title)
 	}
 	return table.Flush()
 }
@@ -474,7 +473,7 @@ func printWorkability(workability *domain.Workability) {
 		return
 	}
 	fmt.Printf("\nWorkable:     %t\n", workability.Workable)
-	fmt.Printf("Disposition:  %s\n", workability.Disposition)
+	fmt.Printf("Work status:  %s\n", workability.WorkStatus)
 	for _, reason := range workability.Reasons {
 		fmt.Printf("  - %s\n", reason)
 	}

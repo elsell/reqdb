@@ -21,7 +21,7 @@ func requirement(id, level string, revision int, parents ...string) domain.Requi
 	return input
 }
 
-func TestComputedWorkabilityAndDisposition(t *testing.T) {
+func TestComputedRequirementWorkStatus(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
 	if err != nil {
@@ -29,7 +29,7 @@ func TestComputedWorkabilityAndDisposition(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	input := requirement("BR-WORKABLE-001", "business", 1)
+	input := requirement("SWR-WORKABLE-001", "software", 1)
 	item, err := store.CreateRequirement(ctx, input, "tester")
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,12 @@ func TestComputedWorkabilityAndDisposition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertWorkability(t, item.Workability, true, "ready_for_work")
+	assertWorkability(t, item.Workability, false, "awaiting_review")
+	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: strings.Repeat("d", 40), Verdict: "reject", Findings: []domain.ReviewFinding{{Message: "The implementation is absent."}}}, "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	item, _ = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
+	assertWorkability(t, item.Workability, false, "needs_task")
 
 	taskInput := domain.TaskInput{Schema: "task/v1", ID: "T-700", Title: "Implement", Description: "Implement the requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: input.ID + "@1", Purpose: "implement"}}}
 	task, err := store.CreateTask(ctx, taskInput, "tester")
@@ -51,7 +56,7 @@ func TestComputedWorkabilityAndDisposition(t *testing.T) {
 	}
 	assertWorkability(t, task.Workability, true, "ready_to_lease")
 	item, _ = store.GetRequirement(ctx, domain.RequirementRef{ID: input.ID})
-	assertWorkability(t, item.Workability, false, "waiting")
+	assertWorkability(t, item.Workability, true, "ready_for_work")
 
 	lease, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester")
 	if err != nil {
@@ -80,10 +85,10 @@ func TestComputedWorkabilityAndDisposition(t *testing.T) {
 	}
 }
 
-func assertWorkability(t *testing.T, actual *domain.Workability, workable bool, disposition string) {
+func assertWorkability(t *testing.T, actual *domain.Workability, workable bool, workStatus string) {
 	t.Helper()
-	if actual == nil || actual.Workable != workable || actual.Disposition != disposition || len(actual.Reasons) == 0 {
-		t.Fatalf("workability is %+v, expected workable=%t disposition=%s with reasons", actual, workable, disposition)
+	if actual == nil || actual.Workable != workable || actual.WorkStatus != workStatus || len(actual.Reasons) == 0 {
+		t.Fatalf("workability is %+v, expected workable=%t work_status=%s with reasons", actual, workable, workStatus)
 	}
 }
 
@@ -95,7 +100,7 @@ func TestReviewVerdictsFindingsAndIdempotency(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	input := requirement("BR-REVIEW-001", "business", 1)
+	input := requirement("SWR-REVIEW-001", "software", 1)
 	if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +161,8 @@ func TestReviewTaskMustMatchRevisionAndCommit(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	first := requirement("BR-REVIEW-TASK-001", "business", 1)
-	second := requirement("BR-REVIEW-TASK-002", "business", 1)
+	first := requirement("SWR-REVIEW-TASK-001", "software", 1)
+	second := requirement("SWR-REVIEW-TASK-002", "software", 1)
 	for _, input := range []domain.RequirementInput{first, second} {
 		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 			t.Fatal(err)
@@ -206,9 +211,9 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 		if _, err := store.CreateRequirement(ctx, input, "tester"); err != nil {
 			t.Fatalf("create %s: %v", input.ID, err)
 		}
-		if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: input.ID}, Commit: strings.Repeat("a", 40), Verdict: "accept"}, "tester"); err != nil {
-			t.Fatalf("review %s: %v", input.ID, err)
-		}
+	}
+	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: "SWR-TEST-001"}, Commit: strings.Repeat("a", 40), Verdict: "accept"}, "tester"); err != nil {
+		t.Fatalf("review software leaf: %v", err)
 	}
 
 	root := requirement("BR-TEST-001", "business", 2)
@@ -220,10 +225,7 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		expected := domain.NotSatisfied
-		if id == "SWR-TEST-001" {
-			expected = domain.NeedsReconciliation
-		}
+		expected := domain.PendingReview
 		if item.ReconciliationState != expected {
 			t.Fatalf("%s state is %s", id, item.ReconciliationState)
 		}
@@ -251,9 +253,10 @@ func TestRequirementReconciliationAndTaskLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.ReconciliationState != domain.ReadyForReview {
+	if item.ReconciliationState != domain.PendingReview {
 		t.Fatalf("state is %s", item.ReconciliationState)
 	}
+	assertWorkability(t, item.Workability, false, "awaiting_review")
 	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: "SWR-TEST-001"}, Commit: strings.Repeat("b", 40), Verdict: "accept"}, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -271,9 +274,6 @@ func TestRequirementImplementationRollsUpFromActiveLeaves(t *testing.T) {
 	if _, err := store.CreateRequirement(ctx, root, "tester"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: root.ID}, Commit: strings.Repeat("a", 40), Verdict: "accept"}, "tester"); err != nil {
-		t.Fatal(err)
-	}
 	child := requirement("STR-ROLLUP-001", "stakeholder", 1, "BR-ROLLUP-001@1")
 	if _, err := store.CreateRequirement(ctx, child, "tester"); err != nil {
 		t.Fatal(err)
@@ -282,23 +282,27 @@ func TestRequirementImplementationRollsUpFromActiveLeaves(t *testing.T) {
 	if _, err := store.CreateRequirement(ctx, grandchild, "tester"); err != nil {
 		t.Fatal(err)
 	}
+	software := requirement("SWR-ROLLUP-001", "software", 1, "SYR-ROLLUP-001@1")
+	if _, err := store.CreateRequirement(ctx, software, "tester"); err != nil {
+		t.Fatal(err)
+	}
 
 	stored, err := store.GetRequirement(ctx, domain.RequirementRef{ID: root.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ReconciliationState != domain.NotSatisfied {
+	if stored.ReconciliationState != domain.PendingReview {
 		t.Fatalf("parent state is %s", stored.ReconciliationState)
 	}
-	assertReadyRequirements(t, store, grandchild.ID)
-	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: root.ID}, Commit: strings.Repeat("b", 40), Verdict: "accept"}, "tester"); err == nil || !strings.Contains(err.Error(), "not a leaf") {
+	assertReadyRequirements(t, store)
+	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: root.ID}, Commit: strings.Repeat("b", 40), Verdict: "accept"}, "tester"); err == nil || !strings.Contains(err.Error(), "not a software requirement") {
 		t.Fatalf("unexpected parent review result: %v", err)
 	}
 	parentTask := domain.TaskInput{Schema: "task/v1", ID: "T-90", Title: "Implement parent", Description: "Implement the parent requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "BR-ROLLUP-001@1", Purpose: "implement"}}}
-	if _, err := store.CreateTask(ctx, parentTask, "tester"); err == nil || !strings.Contains(err.Error(), "not a leaf") {
+	if _, err := store.CreateTask(ctx, parentTask, "tester"); err == nil || !strings.Contains(err.Error(), "not a software requirement") {
 		t.Fatalf("unexpected parent task result: %v", err)
 	}
-	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: grandchild.ID}, Commit: strings.Repeat("b", 40), Verdict: "accept"}, "tester"); err != nil {
+	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: software.ID}, Commit: strings.Repeat("b", 40), Verdict: "accept"}, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	stored, err = store.GetRequirement(ctx, domain.RequirementRef{ID: root.ID})
@@ -323,12 +327,12 @@ func TestRequirementImplementationRollsUpFromActiveLeaves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ReconciliationState != domain.Satisfied {
+	if stored.ReconciliationState != domain.PendingReview {
 		t.Fatalf("retired child affected parent state: %s", stored.ReconciliationState)
 	}
 }
 
-func TestNewRefinementChildBlocksExistingParentTask(t *testing.T) {
+func TestNonSoftwareRequirementCannotHaveTask(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "reqdb.sqlite"))
 	if err != nil {
@@ -340,22 +344,8 @@ func TestNewRefinementChildBlocksExistingParentTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := domain.TaskInput{Schema: "task/v1", ID: "T-91", Title: "Implement root", Description: "Implement the root requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "BR-TASK-ROLLUP-001@1", Purpose: "implement"}}}
-	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
-		t.Fatal(err)
-	}
-	child := requirement("STR-TASK-ROLLUP-001", "stakeholder", 1, "BR-TASK-ROLLUP-001@1")
-	if _, err := store.CreateRequirement(ctx, child, "tester"); err != nil {
-		t.Fatal(err)
-	}
-	ready, err := store.ListTasks(ctx, "", 20, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ready.Items) != 0 {
-		t.Fatalf("parent task remained ready: %+v", ready.Items)
-	}
-	if _, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester"); err == nil || !strings.Contains(err.Error(), "not a leaf") {
-		t.Fatalf("unexpected lease result: %v", err)
+	if _, err := store.CreateTask(ctx, task, "tester"); err == nil || !strings.Contains(err.Error(), "not a software requirement") {
+		t.Fatalf("unexpected non-software task result: %v", err)
 	}
 }
 
@@ -452,10 +442,10 @@ END;
 	}
 	defer database.Close()
 	var migrations int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003', '202608190001')`).Scan(&migrations); err != nil {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003', '202608190001', '202608210001', '202608220001')`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 5 {
+	if migrations != 7 {
 		t.Fatalf("database recorded %d expected migrations", migrations)
 	}
 	var dependencyTables int
@@ -526,6 +516,10 @@ INSERT INTO requirement_revision (requirement_id,revision,level,title,statement,
 VALUES ('BR-MIGRATE-001',1,'business','Migrate','The organization shall migrate.','2026-08-21T00:00:00Z','tester');
 INSERT INTO reconciliation_confirmation (requirement_id,requirement_revision,result,commit_sha,confirmed_at,actor_id)
 VALUES ('BR-MIGRATE-001',1,'existing_code_confirmed','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','2026-08-21T00:00:00Z','tester');
+INSERT INTO requirement (id,current_revision,lifecycle_state,reconciliation_state,created_at,updated_at)
+VALUES ('BR-MIGRATE-PENDING',1,'active','unimplemented','2026-08-21T00:00:00Z','2026-08-21T00:00:00Z');
+INSERT INTO requirement_revision (requirement_id,revision,level,title,statement,created_at,actor_id)
+VALUES ('BR-MIGRATE-PENDING',1,'business','Pending','The organization shall wait.','2026-08-21T00:00:00Z','tester');
 COMMIT;`); err != nil {
 		t.Fatal(err)
 	}
@@ -542,6 +536,10 @@ COMMIT;`); err != nil {
 	}
 	if item.ReconciliationState != domain.Satisfied || len(item.Reviews) != 1 || item.Reviews[0].Verdict != "accept" || !strings.HasPrefix(item.Reviews[0].ID, "RV-MIGRATED-") {
 		t.Fatalf("unexpected migrated requirement: %+v", item)
+	}
+	pending, err := store.GetRequirement(context.Background(), domain.RequirementRef{ID: "BR-MIGRATE-PENDING"})
+	if err != nil || pending.ReconciliationState != domain.PendingReview {
+		t.Fatalf("unexpected pending migration: %+v, %v", pending, err)
 	}
 }
 
@@ -661,7 +659,7 @@ func TestRequirementRevisionInvalidatesDependencyConsumers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ReconciliationState != domain.NeedsReconciliation {
+	if stored.ReconciliationState != domain.PendingReview {
 		t.Fatalf("consumer state is %s", stored.ReconciliationState)
 	}
 }
@@ -740,7 +738,7 @@ func TestRetireRequirementInvalidatesDownstreamAndBlocksTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ReconciliationState != domain.NeedsReconciliation {
+	if stored.ReconciliationState != domain.PendingReview {
 		t.Fatalf("consumer state is %s", stored.ReconciliationState)
 	}
 	ready, err := store.ListTasks(ctx, "", 20, true)
@@ -776,13 +774,13 @@ func TestReadyRequirementsFollowDependenciesAndTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertReadyRequirements(t, store, "SWR-BASE-001")
+	assertReadyRequirements(t, store)
 
 	task := domain.TaskInput{Schema: "task/v1", ID: "T-1", Title: "Implement base", Description: "Implement the base requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-BASE-001@1", Purpose: "implement"}}}
 	if _, err := store.CreateTask(ctx, task, "tester"); err != nil {
 		t.Fatal(err)
 	}
-	assertReadyRequirements(t, store)
+	assertReadyRequirements(t, store, "SWR-BASE-001")
 
 	lease, err := store.LeaseTask(ctx, task.ID, "agent", time.Minute, "tester")
 	if err != nil {
@@ -794,6 +792,10 @@ func TestReadyRequirementsFollowDependenciesAndTasks(t *testing.T) {
 	assertReadyRequirements(t, store)
 
 	if _, _, err := store.ReviewRequirement(ctx, domain.ReviewInput{Requirement: domain.RequirementRef{ID: base.ID}, Commit: strings.Repeat("a", 40), Verdict: "accept"}, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	dependentTask := domain.TaskInput{Schema: "task/v1", ID: "T-2", Title: "Implement dependent", Description: "Implement the dependent requirement.", Priority: 50, Requirements: []domain.TaskRequirementInput{{Requirement: "SWR-DEPENDENT-001@1", Purpose: "implement"}}}
+	if _, err := store.CreateTask(ctx, dependentTask, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	assertReadyRequirements(t, store, "SWR-DEPENDENT-001")

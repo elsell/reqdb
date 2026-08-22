@@ -58,6 +58,19 @@ func TestAPIEnvelopeAndCorrelationID(t *testing.T) {
 	if len(envelope.Data) == 0 || envelope.Meta.CorrelationID != "test-correlation" {
 		t.Fatal("invalid response envelope")
 	}
+	var item struct {
+		ReconciliationState domain.ReconciliationState `json:"reconciliation_state"`
+		Workability         map[string]any             `json:"workability"`
+	}
+	if err := json.Unmarshal(envelope.Data, &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.ReconciliationState != domain.PendingReview || item.Workability["work_status"] != "managed_through_children" {
+		t.Fatalf("unexpected requirement state: %+v", item)
+	}
+	if _, oldField := item.Workability["disposition"]; oldField {
+		t.Fatal("response contains obsolete disposition field")
+	}
 }
 
 func TestReviewReadEndpoints(t *testing.T) {

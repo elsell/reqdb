@@ -48,10 +48,10 @@ func TestRequirementListUsesTable(t *testing.T) {
 }
 
 func TestRequirementDetailUsesFields(t *testing.T) {
-	item := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Satisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Test result", Statement: "The organization shall get one result."}, Workability: &domain.Workability{Disposition: "no_work_required", Reasons: []string{"the requirement is satisfied; no new work is required"}}}
+	item := domain.Requirement{ID: "BR-TEST-001", CurrentRevision: 1, ReconciliationState: domain.Satisfied, Revision: domain.RequirementRevision{Revision: 1, Level: "business", Title: "Test result", Statement: "The organization shall get one result."}, Workability: &domain.Workability{WorkStatus: "no_work_required", Reasons: []string{"the requirement is satisfied; no new work is required"}}}
 	data, _ := json.Marshal(item)
 	output := captureOutput(t, func() error { return printHuman(http.MethodPost, "/v1/requirements", data) })
-	for _, text := range []string{"Requirement BR-TEST-001@1", "Title:", "Reconciliation:", "Workable:     false", "Disposition:  no_work_required", "no new work is required", "Statement:"} {
+	for _, text := range []string{"Requirement BR-TEST-001@1", "Title:", "Reconciliation:", "Workable:     false", "Work status:  no_work_required", "no new work is required", "Statement:"} {
 		if !strings.Contains(output, text) {
 			t.Fatalf("output does not contain %q: %s", text, output)
 		}

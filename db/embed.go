@@ -27,3 +27,8 @@ var WorkflowStateMigration string
 //
 //go:embed review.sql
 var ReviewMigration string
+
+// ReconciliationMigration reduces reconciliation to review results.
+//
+//go:embed reconciliation.sql
+var ReconciliationMigration string

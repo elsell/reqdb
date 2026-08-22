@@ -25,11 +25,9 @@ type ReconciliationState string
 type LifecycleState string
 
 const (
-	NotSatisfied        ReconciliationState = "not_satisfied"
-	InProgress          ReconciliationState = "in_progress"
-	ReadyForReview      ReconciliationState = "ready_for_review"
-	Satisfied           ReconciliationState = "satisfied"
-	NeedsReconciliation ReconciliationState = "needs_reconciliation"
+	PendingReview ReconciliationState = "pending_review"
+	Satisfied     ReconciliationState = "satisfied"
+	NotSatisfied  ReconciliationState = "not_satisfied"
 )
 
 const (
@@ -199,9 +197,9 @@ type Task struct {
 }
 
 type Workability struct {
-	Workable    bool     `json:"workable"`
-	Disposition string   `json:"disposition"`
-	Reasons     []string `json:"reasons"`
+	Workable   bool     `json:"workable"`
+	WorkStatus string   `json:"work_status"`
+	Reasons    []string `json:"reasons"`
 }
 
 type StateChange struct {

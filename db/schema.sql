@@ -6,8 +6,7 @@ CREATE TABLE requirement (
         CHECK (lifecycle_state IN ('active', 'retired')),
     reconciliation_state TEXT NOT NULL
         CHECK (reconciliation_state IN (
-            'not_satisfied', 'in_progress', 'satisfied',
-            'needs_reconciliation', 'ready_for_review'
+            'pending_review', 'satisfied', 'not_satisfied'
         )),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

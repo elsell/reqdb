@@ -384,7 +384,7 @@ func Render(requirements []domain.Requirement) string {
 		fmt.Fprintf(&text, "## %s: %s\n\n", item.ID, item.Revision.Title)
 		fmt.Fprintf(&text, "- Level: %s\n- Revision: %d\n- Lifecycle: %s\n- Reconciliation: %s\n", item.Revision.Level, item.Revision.Revision, item.LifecycleState, item.ReconciliationState)
 		if item.Workability != nil {
-			fmt.Fprintf(&text, "- Workable: %t\n- Disposition: %s\n", item.Workability.Workable, item.Workability.Disposition)
+			fmt.Fprintf(&text, "- Workable: %t\n- Work status: %s\n", item.Workability.Workable, item.Workability.WorkStatus)
 			for _, reason := range item.Workability.Reasons {
 				fmt.Fprintf(&text, "  - Reason: %s\n", reason)
 			}

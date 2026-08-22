@@ -90,15 +90,13 @@ button:disabled { opacity: .55; }
 .status-chip { min-height: 17px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid transparent; border-radius: 9px; padding: 0 5px 0 3px; font-size: 10px; font-weight: 700; line-height: 15px; text-transform: capitalize; white-space: nowrap; }
 .status-chip .status-icon { width: 12px; height: 12px; }
 .status-chip.satisfied, .status-chip.complete { color: #0e6027; background: #defbe6; border-color: #8ee6a8; }
-.status-chip.needs_reconciliation { color: #684000; background: #fff1c7; border-color: #f1c21b; }
-.status-chip.in_progress { color: #003a6d; background: #d0e2ff; border-color: #78a9ff; }
 .status-chip.work_in_progress { color: #003a6d; background: #d0e2ff; border-color: #78a9ff; }
-.status-chip.ready_for_review { color: #491d8b; background: #f6f2ff; border-color: #be95ff; }
+.status-chip.pending_review, .status-chip.awaiting_review { color: #491d8b; background: #f6f2ff; border-color: #be95ff; }
 .status-chip.awaiting_review { color: #491d8b; background: #f6f2ff; border-color: #be95ff; }
 .status-chip.ready_for_work, .status-chip.ready_to_lease { color: #005d5d; background: #d9fbfb; border-color: #3ddbd9; }
 .status-chip.no_work_required { color: #0e6027; background: #defbe6; border-color: #8ee6a8; }
 .status-chip.waiting, .status-chip.managed_through_children { color: #3d3d3d; background: #f4f4f4; border-color: #a8a8a8; }
-.status-chip.unavailable { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }
+.status-chip.inactive { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }
 .status-chip.open, .status-chip.not_satisfied { color: #3d3d3d; background: #f4f4f4; border-color: #a8a8a8; }
 .status-chip.active { color: #003a6d; background: #e5f6ff; border-color: #82cfff; }
 .status-chip.retired, .status-chip.closed { color: #3d3d3d; background: #e8e8e8; border-color: #a8a8a8; }

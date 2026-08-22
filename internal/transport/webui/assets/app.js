@@ -62,13 +62,12 @@ function headerCell(label, definition) {
 
 function statusIcon(value) {
   if (value === "satisfied" || value === "complete") return "check";
-  if (value === "needs_reconciliation") return "warning";
-  if (value === "ready_for_review") return "review";
+  if (value === "pending_review" || value === "awaiting_review") return "review";
   if (value === "ready_for_work" || value === "ready_to_lease") return "ready";
-  if (value === "in_progress" || value === "work_in_progress") return "progress";
+  if (value === "work_in_progress") return "progress";
   if (value === "awaiting_review") return "review";
   if (value === "no_work_required") return "check";
-  if (value === "retired" || value === "closed" || value === "unavailable") return "retired";
+  if (value === "retired" || value === "closed" || value === "inactive") return "retired";
   return "pending";
 }
 
@@ -152,7 +151,7 @@ function statusMatches(type, item) {
   case "requirements": return type === "requirement";
   case "satisfied": return type === "requirement" && item.reconciliation_state === "satisfied";
   case "retired": return type === "requirement" && item.lifecycle_state === "retired";
-  case "needs_reconciliation": return type === "requirement" && item.reconciliation_state === "needs_reconciliation";
+  case "pending_review": return type === "requirement" && item.reconciliation_state === "pending_review";
   case "open_tasks": return type === "task" && item.state === "open";
   case "complete_tasks": return type === "task" && item.state === "complete";
   case "active_leases": return type === "task" && state.leases.some(lease => lease.task_id === item.id);
@@ -210,7 +209,7 @@ function nodeRow({ id, title, lifecycleValue, leaseLabel, workability, stateValu
   row.setAttribute("role", "treeitem");
   if (hasChildren) row.setAttribute("aria-expanded", String(!collapsed));
   if (select) row.setAttribute("aria-selected", String(Boolean(selected)));
-  row.title = [id, title, lifecycleValue, stateValue, workability?.disposition].filter(Boolean).join(" — ");
+  row.title = [id, title, lifecycleValue, stateValue, workability?.work_status].filter(Boolean).join(" — ");
 
   const primary = element("div", "tree-primary");
   primary.style.setProperty("--depth", String(depth));
@@ -228,7 +227,7 @@ function nodeRow({ id, title, lifecycleValue, leaseLabel, workability, stateValu
   }
   const workabilityCell = element("div", `tree-attribute${group ? " muted" : ""}`);
   if (group) workabilityCell.textContent = "—";
-  else workabilityCell.append(statusChip(workability?.disposition || "waiting"));
+  else workabilityCell.append(statusChip(workability?.work_status || "waiting"));
   row.append(primary, lifecycle, workState, workabilityCell);
   if (select) {
     row.classList.add("clickable");
@@ -311,12 +310,12 @@ function renderExplorer() {
     headerCell("Item"),
     headerCell("Lifecycle", "Shows whether the item is active or retired."),
     headerCell("Work state", "Shows the requirement reconciliation state or the task progress state."),
-    headerCell("Workability", "Shows the computed work disposition. Open the item to see whether it is workable and why."),
+    headerCell("Workability", "Shows the computed work status. Open the item to see whether it is workable and why."),
   );
   elements.explorer.append(header);
   const requirementOrder = (left, right) => left.id.localeCompare(right.id);
   const requirements = graph(state.requirements, item => item.revision.parents.map(parent => parent.id), requirementOrder);
-  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state, item.workability?.disposition, ...(item.workability?.reasons || [])];
+  const requirementValues = item => [item.id, item.revision.title, item.revision.statement, item.revision.level, item.lifecycle_state, item.reconciliation_state, item.workability?.work_status, ...(item.workability?.reasons || [])];
   describeRequirement = item => {
     const actions = [{ label: "Copy ID", run: () => copy(`${item.id}@${item.current_revision}`) }];
     if (item.lifecycle_state !== "retired") {
@@ -348,7 +347,7 @@ function renderExplorer() {
   };
 
   const taskOrder = (left, right) => right.priority - left.priority || left.id.localeCompare(right.id);
-  const taskValues = item => [item.id, item.title, item.description, item.state, item.workability?.disposition, ...(item.requirements || []).map(link => link.requirement), ...(item.workability?.reasons || [])];
+  const taskValues = item => [item.id, item.title, item.description, item.state, item.workability?.work_status, ...(item.requirements || []).map(link => link.requirement), ...(item.workability?.reasons || [])];
   describeTask = item => {
     const lease = state.leases.find(value => value.task_id === item.id);
     const actions = [{ label: "Copy ID", run: () => copy(item.id) }];
@@ -498,7 +497,7 @@ function renderDetails() {
     const statuses = element("div", "detail-statuses");
     statuses.append(statusChip(item.lifecycle_state));
     statuses.append(statusChip(item.reconciliation_state));
-    if (item.workability) statuses.append(statusChip(item.workability.disposition));
+    if (item.workability) statuses.append(statusChip(item.workability.work_status));
     elements.details.append(statuses);
     elements.details.append(detailActions(description.actions));
     const properties = element("div", "properties");
@@ -512,7 +511,7 @@ function renderDetails() {
     elements.details.append(properties, detailSection("Statement", item.revision.statement));
     if (!item.workability) elements.details.append(detailSection("History and workability", "Loading…"));
     else {
-      elements.details.append(detailItems("Workability", [`Workable: ${item.workability.workable ? "yes" : "no"}`, `Disposition: ${item.workability.disposition}`, ...item.workability.reasons]));
+      elements.details.append(detailItems("Workability", [`Workable: ${item.workability.workable ? "yes" : "no"}`, `Work status: ${item.workability.work_status}`, ...item.workability.reasons]));
       elements.details.append(detailItems("Revision history", (item.revision_history || []).map(value => `Revision ${value.revision}: ${value.title} — ${new Date(value.created_at).toLocaleString()} — ${value.actor_id}`)));
       elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.field}: ${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
       elements.details.append(detailItems("Reviews", (item.reviews || []).flatMap(value => [
@@ -531,7 +530,7 @@ function renderDetails() {
   elements.details.append(detailTitle("task", `${item.id}: ${item.title}`));
   const statuses = element("div", "detail-statuses");
   statuses.append(statusChip(item.state));
-  if (item.workability) statuses.append(statusChip(item.workability.disposition));
+  if (item.workability) statuses.append(statusChip(item.workability.work_status));
   if (lease) statuses.append(statusChip("in_progress", `leased · ${lease.agent_id}`));
   elements.details.append(statuses);
   elements.details.append(detailActions(description.actions));
@@ -549,7 +548,7 @@ function renderDetails() {
   elements.details.append(properties, detailSection("Description", item.description));
   if (!item.workability) elements.details.append(detailSection("History and workability", "Loading…"));
   else {
-    elements.details.append(detailItems("Workability", [`Workable: ${item.workability.workable ? "yes" : "no"}`, `Disposition: ${item.workability.disposition}`, ...item.workability.reasons]));
+    elements.details.append(detailItems("Workability", [`Workable: ${item.workability.workable ? "yes" : "no"}`, `Work status: ${item.workability.work_status}`, ...item.workability.reasons]));
     elements.details.append(detailItems("State history", (item.state_history || []).map(value => `${value.from || "initial"} → ${value.to} — ${new Date(value.occurred_at).toLocaleString()} — ${value.actor_id}`)));
   }
 }
@@ -671,7 +670,7 @@ function renderSummary() {
     [state.requirements.length, "requirements", "requirement", "requirements"],
     [state.requirements.filter(item => item.reconciliation_state === "satisfied").length, "satisfied", "check", "satisfied"],
     [state.requirements.filter(item => item.lifecycle_state === "retired").length, "retired", "retired", "retired"],
-    [state.requirements.filter(item => item.reconciliation_state === "needs_reconciliation").length, "need reconciliation", "warning", "needs_reconciliation"],
+    [state.requirements.filter(item => item.reconciliation_state === "pending_review").length, "pending review", "review", "pending_review"],
     [state.tasks.filter(item => item.state === "open").length, "open tasks", "pending", "open_tasks"],
     [state.tasks.filter(item => item.state === "complete").length, "complete tasks", "check", "complete_tasks"],
     [state.leases.length, "active leases", "lease", "active_leases"],

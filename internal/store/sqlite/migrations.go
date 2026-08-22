@@ -13,6 +13,7 @@ const requirementDependencyMigrationID = "202608180002"
 const requirementLifecycleMigrationID = "202608180003"
 const workflowStateMigrationID = "202608190001"
 const reviewMigrationID = "202608210001"
+const reconciliationMigrationID = "202608220001"
 
 type migrationRecord struct {
 	ID string `gorm:"column:id;primaryKey;size:255"`
@@ -123,6 +124,12 @@ END`).Error
 			ID: reviewMigrationID,
 			Migrate: func(tx *gorm.DB) error {
 				return tx.Exec(dbschema.ReviewMigration).Error
+			},
+		},
+		{
+			ID: reconciliationMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(dbschema.ReconciliationMigration).Error
 			},
 		},
 	}

@@ -40,13 +40,14 @@ immediate parent level. Each link shall name a parent revision. The refinement
 graph shall be acyclic.
 
 An active requirement with no active current refinement children shall be a
-leaf. Only a leaf can have implementation work or a review. A leaf shall use
-its stored reconciliation state.
+leaf. Only a software requirement can have implementation work or a review. A
+software requirement shall use its stored reconciliation state.
 
 An active non-leaf requirement shall derive its reconciliation state from its
-active current refinement children. It shall be `satisfied` only when every
-active child is recursively `satisfied`. Otherwise, it shall be
-`not_satisfied`. A retired child shall not affect this roll-up.
+active current refinement leaves. It shall be `not_satisfied` when any leaf is
+`not_satisfied`. Otherwise, it shall be `pending_review` when any leaf is
+`pending_review`. Otherwise, it shall be `satisfied`. A retired child shall not
+affect this roll-up.
 
 Roll-up shall be calculated when reqdb reads or evaluates a requirement. Reqdb
 shall not store roll-up changes as reconciliation state history.
@@ -77,8 +78,8 @@ A requirement shall be `active` or `retired`. Retirement shall preserve all
 revisions, links, tasks, reviews, and audit events. It shall not create a
 content revision.
 
-When a requirement is retired, the server shall mark all active, transitive
-downstream requirements as `needs_reconciliation`. It shall follow refinement and
+When a requirement is retired, the server shall set all active, transitive
+downstream requirements to `pending_review`. It shall follow refinement and
 dependency links. It shall record the retired requirement as the cause. It
 shall not retire downstream requirements.
 
@@ -86,25 +87,24 @@ A retired requirement cannot be revised or reviewed. A task that links to a
 retired requirement, or depends on a retired requirement, shall not be workable or
 leaseable.
 
-A requirement is workable when all these conditions are true:
+Reqdb shall report workability with a `workable` Boolean, one derived
+`work_status`, and `reasons`. The first matching requirement rule shall win:
 
-- Its lifecycle is `active`.
-- Its reconciliation state is `not_satisfied` or `needs_reconciliation`.
-- All transitive requirement dependencies are current, active, and
-  `satisfied`.
-- No non-complete task links to its current revision.
+1. `inactive`: The requirement is retired.
+2. `managed_through_children`: The requirement level is not software.
+3. `waiting`: A requirement dependency is not `satisfied`, or linked open
+   tasks exist while none has an active lease and none is ready to lease.
+4. `no_work_required`: The requirement is `satisfied`.
+5. `ready_for_work`: One or more linked open tasks have no active lease.
+6. `work_in_progress`: A linked task has an active lease.
+7. `awaiting_review`: No linked task is open or leased, and the requirement is
+   `pending_review`, or it is `not_satisfied` with one or more tasks completed
+   after the latest review.
+8. `needs_task`: The requirement is `not_satisfied`, no linked task is open,
+   and no linked task completed after the latest review.
 
-Refinement parents shall not affect workability.
-
-Reqdb shall compute one requirement disposition:
-
-- `ready_for_work`: The requirement is workable.
-- `work_in_progress`: An active task lease covers the requirement.
-- `awaiting_review`: A completed task caused `ready_for_review`.
-- `no_work_required`: The requirement is satisfied.
-- `waiting`: A dependency or existing task must change first.
-- `unavailable`: The revision is stale or the requirement is retired.
-- `managed_through_children`: Active refinement children own the work.
+All task checks shall use tasks linked to the current requirement revision. A
+requirement shall be workable only when its work status is `ready_for_work`.
 
 ## Reconciliation
 
@@ -114,13 +114,11 @@ shall use direct reconciliation. A non-leaf shall use refinement roll-up.
 
 | State | Meaning |
 |---|---|
-| `not_satisfied` | A leaf has no accepted review, or a non-leaf has a not-satisfied active child. |
-| `in_progress` | An active task implements or reconciles the requirement. |
-| `ready_for_review` | A task completed and the requirement needs review. |
+| `pending_review` | No valid review result exists for the current revision. |
 | `satisfied` | A leaf has an accepted review, or every active child of a non-leaf is recursively satisfied. |
-| `needs_reconciliation` | An upstream requirement changed after an accepted review. |
+| `not_satisfied` | A leaf has a rejected review, or a non-leaf has a not-satisfied active leaf. |
 
-A review shall be an immutable record for one current, active leaf requirement
+A review shall be an immutable record for one current, active software requirement
 revision and one full Git commit. It shall contain a server-generated ID, the
 reviewer, the review time, and the verdict `accept` or `reject`.
 
@@ -137,33 +135,28 @@ Task completion shall not satisfy a requirement by itself. A review can refer
 to the completed task that produced the commit. That task shall link to the
 exact requirement revision, and its completion commit shall match the review.
 
-A completed task shall set each linked current leaf requirement to
-`ready_for_review`. A requirement in this state shall not be workable for another
-task. An accepted review shall set it to `satisfied` and resolve its open
-reconciliation causes. A rejected review shall set it to
-`needs_reconciliation` when an open cause exists. Otherwise, it shall set it to
+A task or lease change shall not change reconciliation state. An accepted
+review shall set the current requirement revision to `satisfied` and resolve
+its open reconciliation causes. A rejected review shall set it to
 `not_satisfied`.
 
-A review without a task shall be valid for an actionable or ready-for-review
-requirement. The server shall make review creation idempotent by requirement
+A review without a task shall be valid for a current software requirement. The
+server shall make review creation idempotent by requirement
 ID, revision, and commit. An identical submission shall return the stored
 review. Different content for the same key shall cause a conflict.
 
-`requirement get` shall show its workability, disposition, and reasons. The
+`requirement get` shall show its workability, work status, and reasons. The
 reasons shall include state, active tasks, stale dependencies, retired
 dependencies, and dependencies that are not satisfied.
 
 When a requirement gets a new revision, the server shall:
 
-1. Set the requirement to `not_satisfied`.
+1. Set the new current revision to `pending_review`.
 2. Find all transitive downstream requirements through refinement and
    dependency links.
-3. Set each downstream requirement to `needs_reconciliation`.
+3. Set each downstream requirement to `pending_review`.
 4. Record the changed requirement as an unresolved cause for each affected
    requirement.
-
-An active implementation or reconciliation task may set a not-satisfied or
-affected leaf requirement to `in_progress`.
 
 ## Tasks and leases
 
@@ -171,8 +164,8 @@ A task shall have a title, description, priority, state, requirement links,
 and task dependencies. A requirement link shall have the purpose `implement`
 or `reconcile`.
 
-An implementation or reconciliation task shall link only to leaf requirement
-revisions.
+An implementation or reconciliation task shall link only to software
+requirement revisions.
 
 A task shall be `open`, `complete`, or `closed`. Closing shall stop an open,
 unleased task without completing it. A closed task shall not satisfy task
@@ -190,7 +183,8 @@ A task is workable when all these conditions are true:
 The lease operation shall check the same conditions in its transaction. Workable
 tasks shall sort by descending priority and then by ID.
 
-Reqdb shall compute one task disposition:
+Reqdb shall use the same workability shape for tasks. It shall compute one task
+work status:
 
 - `ready_to_lease`: The task is workable.
 - `work_in_progress`: An active lease covers the task.
@@ -204,8 +198,7 @@ completion operations shall use the current lease and fence.
 
 The server shall schedule the next lease expiry and process it promptly after
 its expiry time. Lease changes shall reschedule this work. Expiry shall remove
-the active lease and recalculate each linked requirement state. It shall record
-the lease expiry and all resulting state changes.
+the active lease and record the lease expiry.
 
 The server shall list active leases in ascending lease ID order. The list shall
 support cursor pagination and optional agent and task filters. Expired leases
@@ -215,7 +208,7 @@ A completed task shall record its full 40-character hexadecimal Git commit.
 A task can link to zero or more pull requests. A pull request can link to more
 than one task. Task detail output shall show all pull request links.
 
-`task get` shall show its state history, workability, disposition, and reasons.
+`task get` shall show its state history, workability, work status, and reasons.
 
 ## Audit
 
