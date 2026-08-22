@@ -3,7 +3,7 @@
 `reqdb` tracks requirements and their implementation in code. It also
 coordinates the tasks that implement or reconcile those requirements.
 
-- One server owns a SQLite database.
+- One server owns a SQLite or PostgreSQL database.
 - The same binary is the server and its CLI client.
 - Requirements have immutable revisions and a current reconciliation state.
 - Parent changes make all downstream requirements need reconciliation.
@@ -52,6 +52,19 @@ Use `--project ID` or `REQDB_PROJECT` to override the saved project and `--json`
 for machine-readable output. Use `--actor ID` to label the actor in the audit
 log; with a shared password this label is caller-supplied rather than a verified
 identity. Use HTTPS whenever the server is accessed over a network.
+
+SQLite remains the default database. To use PostgreSQL, select the backend and
+provide its DSN through the environment:
+
+```text
+export REQDB_PASSWORD='choose-a-password'
+export REQDB_DATABASE_URL='postgres://reqdb:password@db.example/reqdb?sslmode=require'
+build/reqdb serve --database postgres --listen 0.0.0.0:8080
+```
+
+SQLite and PostgreSQL use the same store implementation behind database
+adapters. An existing SQLite database is not automatically copied to
+PostgreSQL.
 
 Print the embedded build version with `build/reqdb version`. Released container
 images show the same version in the web header and are published to

@@ -122,6 +122,7 @@ Usage:
   reqdb serve [options]
 
 Options:
+  --database BACKEND            sqlite or postgres (default "sqlite")
   --db PATH                     SQLite database path (default "reqdb.sqlite")
   --listen ADDRESS              Listen address (default "127.0.0.1:8080")
   --audit-retention-days DAYS   Audit retention period (default 90)
@@ -129,6 +130,7 @@ Options:
 
 Environment:
   REQDB_PASSWORD                Required shared bearer password
+  REQDB_DATABASE_URL            PostgreSQL DSN when --database=postgres
 
 Example:
   reqdb serve --db reqdb.sqlite --listen 127.0.0.1:8080

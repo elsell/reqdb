@@ -13,9 +13,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=1 go build -tags "netgo osusergo" -trimpath \
     -ldflags "-s -w -X github.com/elsell/reqdb/internal/buildinfo.Version=${BUILD_VERSION} -X github.com/elsell/reqdb/internal/buildinfo.Revision=${BUILD_REVISION} -X github.com/elsell/reqdb/internal/buildinfo.BuildDate=${BUILD_DATE}" \
     -o /workspace/reqdb ./cmd/reqdb
-RUN mkdir -p /workspace/data /workspace/tmp /workspace/runtime/lib64 && \
+RUN mkdir -p /workspace/data /workspace/tmp /workspace/runtime/lib64 /workspace/runtime/etc/ssl/certs && \
     cp -L /lib64/ld-linux-x86-64.so.2 /workspace/runtime/lib64/ && \
-    cp -L /lib64/libc.so.6 /workspace/runtime/lib64/
+    cp -L /lib64/libc.so.6 /workspace/runtime/lib64/ && \
+    cp -L /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /workspace/runtime/etc/ssl/certs/ca-certificates.crt
 
 FROM scratch
 

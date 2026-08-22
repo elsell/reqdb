@@ -4,3 +4,4 @@ build
 bin
 reqdb.sqlite
 *.sqlite
+*.db

@@ -14,8 +14,8 @@ workflows.
 
 ## Authority
 
-- SQLite shall be the system of record.
-- One server shall own the SQLite file on local storage.
+- SQLite or PostgreSQL shall be the system of record.
+- One server shall own the selected database.
 - All CLI commands shall use the server.
 - YAML shall be an input format only. The CLI shall also accept resource
   attributes as options.
@@ -288,7 +288,7 @@ Server-wide and graph-wide operations shall remain top-level commands:
 
 | Command | Result |
 |---|---|
-| `serve` | Own the SQLite database and serve clients. |
+| `serve` | Own the selected database and serve clients. |
 | `trace [REQUIREMENT]` | Show the refinement hierarchy and separate dependency links. |
 | `impact REQUIREMENT` | Follow refinement and dependency links to show affected requirements and tasks. |
 | `audit [ENTITY]` | List audit events. |

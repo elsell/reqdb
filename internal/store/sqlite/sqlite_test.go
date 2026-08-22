@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,12 +13,50 @@ import (
 
 	"github.com/elsell/reqdb/internal/domain"
 	"github.com/elsell/reqdb/internal/ports"
+	postgresstore "github.com/elsell/reqdb/internal/store/postgres"
 	"github.com/elsell/reqdb/internal/store/sqlite"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func openStore(t *testing.T) (*sqlite.Store, string) {
 	t.Helper()
+	if dsn := os.Getenv("REQDB_TEST_POSTGRES_DSN"); dsn != "" {
+		config, err := pgx.ParseConfig(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admin := stdlib.OpenDB(*config)
+		if err := admin.Ping(); err != nil {
+			t.Fatal(err)
+		}
+		schema := fmt.Sprintf("reqdb_test_%d", time.Now().UnixNano())
+		if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
+			admin.Close()
+			t.Fatal(err)
+		}
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := parsed.Query()
+		query.Set("search_path", schema)
+		parsed.RawQuery = query.Encode()
+		scopedDSN := parsed.String()
+		store, err := postgresstore.Open(scopedDSN)
+		if err != nil {
+			_, _ = admin.Exec(`DROP SCHEMA ` + schema + ` CASCADE`)
+			admin.Close()
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = store.Close()
+			_, _ = admin.Exec(`DROP SCHEMA ` + schema + ` CASCADE`)
+			_ = admin.Close()
+		})
+		return store, scopedDSN
+	}
 	path := filepath.Join(t.TempDir(), "reqdb.sqlite")
 	store, err := sqlite.Open(path)
 	if err != nil {
@@ -57,6 +97,9 @@ func TestProjectsIsolateDuplicateResourceIDs(t *testing.T) {
 }
 
 func TestOldSchemaIsRejected(t *testing.T) {
+	if os.Getenv("REQDB_TEST_POSTGRES_DSN") != "" {
+		t.Skip("SQLite compatibility test")
+	}
 	path := filepath.Join(t.TempDir(), "old.sqlite")
 	database, err := sql.Open("sqlite3", path)
 	if err != nil {
@@ -285,6 +328,37 @@ func TestLeaseReleaseAndExpiryDoNotChangeReconciliation(t *testing.T) {
 	}
 }
 
+func TestConcurrentLeaseClaimsHaveOneWinner(t *testing.T) {
+	store, _ := openStore(t)
+	create(t, store,
+		requirement("BR-CONCURRENT-001", "business", 1),
+		requirement("STR-CONCURRENT-001", "stakeholder", 1, "BR-CONCURRENT-001@1"),
+	)
+	created, err := store.CreateTask(context.Background(), task("T-CONCURRENT", "STR-CONCURRENT-001@1"), "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, agent := range []string{"agent-a", "agent-b"} {
+		go func(agent string) {
+			<-start
+			_, claimErr := store.LeaseTask(context.Background(), created.ID, agent, time.Minute, agent)
+			results <- claimErr
+		}(agent)
+	}
+	close(start)
+	successes := 0
+	for range 2 {
+		if err := <-results; err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful concurrent claims = %d, want 1", successes)
+	}
+}
+
 func TestReconciliationRollsUpThroughOptionalSystemLevel(t *testing.T) {
 	store, _ := openStore(t)
 	create(t, store,
@@ -359,6 +433,9 @@ func TestReviewIsImmutableAndRejectRequiresFindings(t *testing.T) {
 }
 
 func TestDatabaseReopensAndUsesOnlyCurrentSchema(t *testing.T) {
+	if os.Getenv("REQDB_TEST_POSTGRES_DSN") != "" {
+		t.Skip("SQLite schema introspection test")
+	}
 	store, path := openStore(t)
 	create(t, store, requirement("BR-REOPEN-001", "business", 1))
 	if err := store.Close(); err != nil {

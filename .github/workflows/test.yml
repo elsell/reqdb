@@ -1,0 +1,56 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite:
+    name: SQLite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test SQLite and application
+        run: go test ./...
+
+  postgres:
+    name: PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+        env:
+          POSTGRES_DB: reqdb
+          POSTGRES_PASSWORD: reqdb
+          POSTGRES_USER: reqdb
+        options: >-
+          --health-cmd "pg_isready -U reqdb -d reqdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test shared store against PostgreSQL
+        env:
+          REQDB_TEST_POSTGRES_DSN: postgres://reqdb:reqdb@127.0.0.1:5432/reqdb?sslmode=disable
+        run: go test -count=1 ./internal/store/sqlite

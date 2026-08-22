@@ -21,6 +21,8 @@ import (
 	"github.com/elsell/reqdb/internal/buildinfo"
 	"github.com/elsell/reqdb/internal/client"
 	"github.com/elsell/reqdb/internal/observability"
+	"github.com/elsell/reqdb/internal/ports"
+	postgresstore "github.com/elsell/reqdb/internal/store/postgres"
 	"github.com/elsell/reqdb/internal/store/sqlite"
 	"github.com/elsell/reqdb/internal/transport/httpapi"
 	"github.com/elsell/reqdb/internal/transport/webui"
@@ -166,6 +168,7 @@ func serve(args []string) error {
 	set := flag.NewFlagSet("serve", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	dbPath := set.String("db", "reqdb.sqlite", "SQLite database path")
+	database := set.String("database", "sqlite", "database backend (sqlite or postgres)")
 	listen := set.String("listen", "127.0.0.1:8080", "listen address")
 	retention := set.Int("audit-retention-days", 90, "audit retention in days")
 	if err := set.Parse(args); err != nil {
@@ -182,7 +185,20 @@ func serve(args []string) error {
 	if password == "" {
 		return errors.New("REQDB_PASSWORD must be set")
 	}
-	store, err := sqlite.Open(*dbPath)
+	var store ports.Store
+	var err error
+	switch *database {
+	case "sqlite":
+		store, err = sqlite.Open(*dbPath)
+	case "postgres":
+		dsn := os.Getenv("REQDB_DATABASE_URL")
+		if dsn == "" {
+			return errors.New("REQDB_DATABASE_URL must be set when --database=postgres")
+		}
+		store, err = postgresstore.Open(dsn)
+	default:
+		return fmt.Errorf("unsupported database backend %q; use sqlite or postgres", *database)
+	}
 	if err != nil {
 		return err
 	}
