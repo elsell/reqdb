@@ -442,10 +442,10 @@ END;
 	}
 	defer database.Close()
 	var migrations int
-	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003', '202608190001', '202608210001', '202608220001')`).Scan(&migrations); err != nil {
+	if err := database.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('SCHEMA_INIT', '202608180001', '202608180002', '202608180003', '202608190001', '202608210001', '202608220001', '202608220002')`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 7 {
+	if migrations != 8 {
 		t.Fatalf("database recorded %d expected migrations", migrations)
 	}
 	var dependencyTables int
@@ -520,6 +520,8 @@ INSERT INTO requirement (id,current_revision,lifecycle_state,reconciliation_stat
 VALUES ('BR-MIGRATE-PENDING',1,'active','unimplemented','2026-08-21T00:00:00Z','2026-08-21T00:00:00Z');
 INSERT INTO requirement_revision (requirement_id,revision,level,title,statement,created_at,actor_id)
 VALUES ('BR-MIGRATE-PENDING',1,'business','Pending','The organization shall wait.','2026-08-21T00:00:00Z','tester');
+INSERT INTO state_history (entity_type,entity_id,field,from_value,to_value,occurred_at,actor_id)
+VALUES ('requirement','BR-MIGRATE-PENDING','reconciliation','in_progress','ready_for_review','2026-08-21T00:00:00Z','tester');
 COMMIT;`); err != nil {
 		t.Fatal(err)
 	}
@@ -540,6 +542,11 @@ COMMIT;`); err != nil {
 	pending, err := store.GetRequirement(context.Background(), domain.RequirementRef{ID: "BR-MIGRATE-PENDING"})
 	if err != nil || pending.ReconciliationState != domain.PendingReview {
 		t.Fatalf("unexpected pending migration: %+v, %v", pending, err)
+	}
+	for _, change := range pending.StateHistory {
+		if change.Field == "reconciliation" && change.From == change.To {
+			t.Fatalf("migration kept no-op state history: %+v", change)
+		}
 	}
 }
 

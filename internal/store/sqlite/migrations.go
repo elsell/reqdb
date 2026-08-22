@@ -14,6 +14,7 @@ const requirementLifecycleMigrationID = "202608180003"
 const workflowStateMigrationID = "202608190001"
 const reviewMigrationID = "202608210001"
 const reconciliationMigrationID = "202608220001"
+const reconciliationHistoryCleanupMigrationID = "202608220002"
 
 type migrationRecord struct {
 	ID string `gorm:"column:id;primaryKey;size:255"`
@@ -130,6 +131,12 @@ END`).Error
 			ID: reconciliationMigrationID,
 			Migrate: func(tx *gorm.DB) error {
 				return tx.Exec(dbschema.ReconciliationMigration).Error
+			},
+		},
+		{
+			ID: reconciliationHistoryCleanupMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(`DELETE FROM state_history WHERE entity_type='requirement' AND field='reconciliation' AND from_value=to_value`).Error
 			},
 		},
 	}
